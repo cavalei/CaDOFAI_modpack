@@ -1,0 +1,129 @@
+# Tag-based release workflow.
+#
+# Usage: GitHub repo > Releases > Draft a new release
+#   1. Choose or create a tag (numeric X.Y.Z, e.g. 5.0.3; suffixes like 5.0.3-beta.1 allowed)
+#   2. Check "Set as a pre-release" for beta, leave unchecked for stable
+#   3. Write release notes from tool/release_template.md, then Publish -> this workflow builds and attaches the files automatically
+#
+# Steps:
+#   1. Validate the tag and check that the code version matches it
+#   2. Check out O5Kit (sibling ProjectReference, not a submodule) + stage
+#      the checked-in reference DLLs (tool/build-refs/game/)
+#   3. Build Release_ML
+#   4. Assemble Overlayer_ML_win.zip / Overlayer_ML_linux.zip / Overlayer_ML_mac.zip
+#   5. Upload the zips to the published release (prerelease flag from the release is preserved)
+#
+# Before tagging (locally):
+#   ./tool/set_version.sh 5.0.3   # inject version into Info.cs + csproj
+#   git add Overlayer/Core/Info.cs Overlayer/Overlayer.csproj
+#   git commit -m "5.0.3" && git push
+#   # then Draft a new release on GitHub with tag 5.0.3 and publish it
+#
+# NOTE: keep the code version numeric (X.Y.Z). A tag suffix like "-beta.1" is fine for
+#   naming, but only the numeric part is injected into the build: OverlayerRuntime parses
+#   Info.Version with new Version(), which throws on suffixes and would crash in-game.
+#   Beta vs stable is distinguished via the release prerelease flag instead.
+
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - name: Validate tag and code version
+        run: |
+          if ! [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag must look like X.Y.Z with an optional suffix (e.g. 5.0.3 or 5.0.3-beta.1). Got: $TAG"
+            exit 1
+          fi
+          NUM="$(echo "$TAG" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')"
+          CODE_VER="$(grep -oP '(?<=public const string Version = ")[^"]+' Overlayer/Core/Info.cs)"
+          if [[ "$NUM" != "$CODE_VER" ]]; then
+            echo "::error::code version ($CODE_VER) does not match tag ($TAG). Run tool/set_version.sh $NUM, commit it, move the tag, and re-publish."
+            exit 1
+          fi
+          echo "tag=$TAG code_version=$CODE_VER"
+
+      - name: Checkout O5Kit
+        # Sibling ProjectReference (Overlayer.csproj -> ../../O5Kit/...),
+        # not a submodule: it must sit next to this checkout, with its own
+        # LitMotion submodule initialized. The checkout action only allows
+        # paths inside the workspace, so land inside and move it out.
+        uses: actions/checkout@v4
+        with:
+          repository: modlist-org/O5Kit
+          path: O5Kit-tmp
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Move O5Kit next to checkout
+        run: |
+          rm -rf ../O5Kit
+          mv O5Kit-tmp ../O5Kit
+          ls ../O5Kit/src/O5Kit/O5Kit.csproj ../O5Kit/lib/LitMotion/src/LitMotion/Assets/LitMotion/Runtime/LMotion.Create.cs
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore game reference DLLs
+        run: |
+          # We cannot ship the game's copyrighted DLLs in the repo. Instead
+          # tool/build-refs/game/ holds stripped reference assemblies built
+          # by tool/pack_refs.sh: real API surface, every method body
+          # replaced by `ret` / `throw null`, resources dropped. No game
+          # logic or game data — just what the compiler resolves HintPaths
+          # against. tool/build-refs/build-refs.sha256 pins the real game
+          # DLLs they were harvested from.
+          dotnet run --project tool/GenRefs/GenRefs.csproj -- \
+            verify tool/build-refs/build-refs.txt tool/build-refs
+          mkdir -p /tmp/gamerefs
+          cp -r tool/build-refs/game /tmp/gamerefs/game
+          ls -R /tmp/gamerefs/game | head -n 20
+
+      - name: Use CI game paths
+        run: |
+          cat > Directory.Build.props <<'EOF'
+          <Project>
+              <PropertyGroup>
+                  <GamePath>/tmp/gamerefs/game</GamePath>
+                  <GameData>GameData</GameData>
+              </PropertyGroup>
+          </Project>
+          EOF
+          ls -R /tmp/gamerefs/game | head -n 30
+
+      - name: Build (Release_ML)
+        # GamePath/GameData as global properties so the O5Kit
+        # ProjectReference (outside this Directory.Build.props tree)
+        # resolves the same fake tree.
+        run: dotnet build Overlayer/Overlayer.csproj -c Release_ML --nologo -v minimal -p:GamePath=/tmp/gamerefs/game -p:GameData=GameData
+
+      - name: Package zips
+        run: ./tool/make_zips.sh
+
+      - name: Attach files to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          prerelease: ${{ github.event.release.prerelease }}
+          files: |
+            dist/Overlayer_ML_win.zip
+            dist/Overlayer_ML_linux.zip
+            dist/Overlayer_ML_mac.zip

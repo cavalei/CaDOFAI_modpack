@@ -1,0 +1,242 @@
+using Newtonsoft.Json.Linq;
+using Overlayer.Core;
+using Overlayer.IO.Fx;
+using Overlayer.IO.Interface;
+using Overlayer.IO.Overlay;
+using Overlayer.Package;
+using UnityEngine;
+using UnityEngine.UI;
+using Object = UnityEngine.Object;
+
+namespace Overlayer.Overlay;
+
+public class OvCanvas : ISettingsFile {
+    public readonly GameObject GameObject;
+    public readonly RectTransform RectTransform;
+    public readonly CanvasGroup CanvasGroup;
+    public readonly Canvas Canvas;
+    public readonly CanvasScaler CanvasScaler;
+    public readonly GraphicRaycaster GraphicRaycaster;
+    public readonly List<OvObject> OvObjects = [];
+
+    private readonly Action<Camera> onCameraChangedHandler;
+
+    public OvCanvasSettings Config = new();
+
+    public O5cpProps Props = new();
+
+    internal bool IsPackage { get; set; }
+    internal string PackageId { get; set; }
+
+    internal string SourceFile { get; set; }
+
+    public bool HasAnyFx => Config?.HasAnyFx ?? false;
+
+    private string _lastName;
+    private bool _lastEnabled = true;
+
+    public OvCanvas() {
+        GameObject = new GameObject("OvCanvas");
+        GameObject.transform.SetParent(OverlayCore.Transform, false);
+        RectTransform = GameObject.AddComponent<RectTransform>();
+        Canvas = GameObject.AddComponent<Canvas>();
+        CanvasGroup = GameObject.AddComponent<CanvasGroup>();
+        CanvasScaler = GameObject.AddComponent<CanvasScaler>();
+        GraphicRaycaster = GameObject.AddComponent<GraphicRaycaster>();
+
+        var mainCam = MainCore.Cam.Camera;
+        if (mainCam != null) {
+            Overlayer.Compat.CanvasCompat.SetWorldCamera(Canvas, mainCam);
+        }
+
+        onCameraChangedHandler = camera => {
+            if (Canvas != null) {
+                Overlayer.Compat.CanvasCompat.SetWorldCamera(Canvas, camera);
+            }
+        };
+        MainCore.Cam.OnCameraChanged += onCameraChangedHandler;
+
+        ApplyConfig();
+    }
+
+    public OvObject CreateOvObject() {
+        var obj = new OvObject();
+        Attach(obj);
+        return obj;
+    }
+
+    public void ApplyConfig() {
+        _lastName = Config.Name.Value;
+        GameObject.name = _lastName;
+        _lastEnabled = Config.Enabled.Value;
+        GameObject.SetActive(_lastEnabled);
+        Config.RectTransformConfig.ToUnity(GameObject);
+        Config.CanvasGroupConfig.ToUnity(GameObject);
+        Config.CanvasConfig.ToUnity(GameObject);
+        Config.CanvasScalerConfig.ToUnity(GameObject);
+        Config.GraphicRaycasterConfig.ToUnity(GameObject);
+    }
+
+    public void RefreshFx() {
+        if (Config == null) {
+            return;
+        }
+
+        if (FxUtil.Changed(ref _lastName, Config.Name.Value)) GameObject.name = _lastName;
+        if (FxUtil.Changed(ref _lastEnabled, Config.Enabled.Value)) GameObject.SetActive(_lastEnabled);
+        Config.RectTransformConfig?.RefreshFx(GameObject);
+        Config.CanvasGroupConfig?.RefreshFx(GameObject);
+        Config.CanvasConfig?.RefreshFx(GameObject);
+        Config.CanvasScalerConfig?.RefreshFx(GameObject);
+        Config.GraphicRaycasterConfig?.RefreshFx(GameObject);
+        foreach (var obj in OvObjects) {
+            obj?.RefreshFx();
+        }
+    }
+
+    public void Attach(OvObject obj) {
+        if (obj == null) {
+            return;
+        }
+
+        if (obj.GameObject == null) {
+            return;
+        }
+
+        if (obj.GameObject.transform.parent == RectTransform) {
+            return;
+        }
+
+        obj.GameObject.transform.SetParent(RectTransform, false);
+
+        if (!OvObjects.Contains(obj)) {
+            OvObjects.Add(obj);
+        }
+    }
+
+    public void Detach(OvObject obj) {
+        if (obj == null) {
+            return;
+        }
+
+        if (obj.GameObject == null) {
+            return;
+        }
+
+        if (!OvObjects.Remove(obj)) {
+            return;
+        }
+
+        obj.GameObject.transform.SetParent(OverlayCore.Transform, false);
+    }
+
+    public void SetOrder(int index) {
+        if (RectTransform == null || RectTransform.parent == null) {
+            return;
+        }
+        index = O5Kit.Core.MathCompat.Clamp(index, 0, RectTransform.parent.childCount - 1);
+        RectTransform.SetSiblingIndex(index);
+    }
+
+    public void BringToFront() {
+        if (RectTransform == null || RectTransform.parent == null) {
+            return;
+        }
+        RectTransform.SetSiblingIndex(RectTransform.parent.childCount - 1);
+    }
+
+    public void SendToBack() {
+        if (RectTransform == null || RectTransform.parent == null) {
+            return;
+        }
+        RectTransform.SetSiblingIndex(0);
+    }
+
+    public JToken Serialize() {
+        var json = new JObject {
+            [nameof(Config)] = Config.Serialize()
+        };
+
+        if (Props != null && !IsDefaultProps(Props)) {
+            json[O5cpProps.JsonKey] = Props.Serialize();
+        }
+
+        if (OvObjects != null && OvObjects.Count > 0) {
+            json[nameof(OvObjects)] = new JArray(OvObjects.Select(x => x.Serialize()));
+        }
+
+        return json;
+    }
+
+    private static bool IsDefaultProps(O5cpProps props) {
+        return string.IsNullOrEmpty(props.ThumbnailPath)
+            && string.IsNullOrEmpty(props.Author)
+            && string.IsNullOrEmpty(props.Description)
+            && (props.Version is null or "1.0.0")
+            && string.IsNullOrEmpty(props.License)
+            && (props.ExtraScripts == null || props.ExtraScripts.Count == 0);
+    }
+
+    public void Deserialize(JToken token) {
+        if (token == null) {
+            return;
+        }
+
+        if (token[nameof(Config)] != null) {
+            Config.Deserialize(token[nameof(Config)]);
+        }
+
+        Props = O5cpProps.Parse(token[O5cpProps.JsonKey]);
+
+        if (token[nameof(OvObjects)] is JArray array) {
+            for (int i = OvObjects.Count - 1; i >= 0; i--) {
+                OvObjects[i].Dispose();
+            }
+            OvObjects.Clear();
+
+            foreach (var item in array) {
+                var obj = new OvObject(bare: item[nameof(Config)]?["RectTransformConfig"] == null);
+                obj.Deserialize(item);
+
+                Attach(obj);
+                obj.ApplyComponent();
+                obj.ApplyConfig();
+            }
+        }
+
+        ApplyConfig();
+    }
+
+    internal void RefreshLayouts() {
+        ApplyConfig();
+        foreach (var obj in OvObjects) {
+            obj.RefreshLayout();
+        }
+
+        Canvas.ForceUpdateCanvases();
+        foreach (var obj in OvObjects) {
+            obj.RebuildLayout();
+        }
+
+        Canvas.ForceUpdateCanvases();
+    }
+
+    public void Dispose() {
+        MainCore.Cam?.OnCameraChanged -= onCameraChangedHandler;
+
+        for (int i = OvObjects.Count - 1; i >= 0; i--) {
+            OvObjects[i].Dispose();
+        }
+
+        OvObjects.Clear();
+
+        try {
+            Overlayer.IO.Fx.FxDisposal.DisposeDeep(Config);
+        } catch {
+        }
+
+        if (Canvas != null) {
+            Object.Destroy(Canvas.gameObject);
+        }
+    }
+}

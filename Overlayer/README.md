@@ -1,0 +1,78 @@
+# <div align="center">Overlayer</div>
+
+<div align="center">
+    <img src="ov5_logo.svg" height="256" alt="Overlayer V5 Logo">
+</div>
+
+<div align="center">
+
+### ⟡ Display everything as you wish. ⟡
+
+</div>
+
+<div align="center">
+
+Custom Unity Overlay UI mode for users!
+
+</div>
+
+# 🛠️ Installation
+
+## 🍉 MelonLoader
+
+> [!IMPORTANT]
+> You must extract the contents of the zip file **directly into your game's root directory** (where the game `.exe` lives). Ensure the internal folders line up perfectly with your existing game directory structure.
+
+1. Download the specific `Overlayer-ML` zip file that matches your system architecture (e.g., `Overlayer-ML-win64.zip`).
+2. Open your game's installation root folder.
+3. Extract all contents of the downloaded zip file directly into that folder.
+
+# ⌨️ Usage
+### Controls
+* **Open/Close Settings Window:** Press <kbd>Alt</kbd> + <kbd>`</kbd> (Backtick) to toggle the main GUI configuration window.
+* **Reset Window Layout:** Hold the window toggle key (<kbd>Alt</kbd> + <kbd>`</kbd>) for **over 0.4 seconds** to reset the window's size and position to default.
+> [!NOTE]
+> Linux shortcuts are different. You must use <kbd>Ctrl</kbd> + <kbd>`</kbd> This is because they conflict with KDE Plasma shortcuts!
+* **Toggle Menu:** Click the **logo in the top-left corner** of the settings window to open and close the navigation menu.
+
+# 🧩 Modules
+Overlayer v5 loads game-specific features and tags from modules at runtime.
+To get them for a game, install that game's module alongside Overlayer.
+
+> [!NOTE]
+> Modules require Overlayer and cannot run on their own.
+
+## Available modules
+| Game | Module |
+|------|--------|
+| A Dance of Fire and Ice | [Overlayer.Module.ADOFAI](https://github.com/modlist-org/Overlayer.Module.ADOFAI) |
+
+# 🛠️ Development
+you obviously need the .NET SDK. copy `Directory.Build.example.props` to `Directory.Build.props` and set `GamePath` + `GameData` or nothing builds
+
+```bash
+./test.sh    # tests, no game dlls needed. run before push idk
+./build.sh   # builds Release_ML (./build.sh Debug_ML whatever)
+./zip.sh     # zips
+./bump.sh patch   # or 5.0.4 / minor / major. --force if u sure (do u really need it tho)
+```
+numeric fx needs the native lib: `zig` 0.17+ then `../O5Kit/native/build.sh` (drops `O5KitNative.<os>.<ext>` into `zig-out/lib`, auto-copied to UserLibs on build)
+ps1 twins exist for windows. ts: `impl.d.ts` spawns next to `impl.js`, tsc your stuff and throw the js into `Script/`. release: bump -> commit `"X.Y.Z"` -> tag -> publish
+
+# ⚖️ Licenses
+### Logo
+- The Overlayer logo is based on a modified version of the Google V8 logo.
+  - Original logo license: [CC BY-NC 3.0](https://creativecommons.org/licenses/by-nc/3.0/)
+  - Original project/source: [Google V8](https://v8.dev/)
+- Overlayer is not affiliated with, endorsed by, or associated with Google or the V8 project.
+
+### Third-Party Code
+- **[O5Kit](https://github.com/modlist-org/O5Kit)**: UI + input toolkit (settings controls, tooltip, unified input). Referenced as a project dependency and shipped to `UserLibs`
+  - License: [LGPL-3.0-or-later](https://github.com/modlist-org/O5Kit/blob/main/LICENCE.md)
+- **[UniverseLib](https://github.com/sinai-dev/UniverseLib/tree/f6a9ed9a4d58bfe13eaae570c53f59a00b575ca0)**: Parts of input handling logic (now in O5Kit, see [`src/O5Kit/Input`](https://github.com/modlist-org/O5Kit/tree/main/src/O5Kit/Input)) are referenced and derived from UniverseLib.
+  - License: [LGPL-2.1](https://github.com/sinai-dev/UniverseLib/blob/f6a9ed9a4d58bfe13eaae570c53f59a00b575ca0/LICENSE)
+- All other external dependencies are managed and imported via **NuGet**.
+---
+
+> [!NOTE]
+> Overlayer V5 is currently under active development!

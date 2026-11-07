@@ -1,0 +1,17 @@
+# 构建产物
+bin/
+obj/
+
+# 第三方 DLL（自行从游戏目录获取，见 README）
+libs/
+
+# 凭据
+.gh_token
+*.token
+
+# 本地环境
+.vs/
+.idea/
+*.user
+*.cache
+Log.txt

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- StrictJudge：Overlayer 的严判预测模块（自研，非上游代码） -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>Overlayer.Module.StrictJudge</AssemblyName>
+    <RootNamespace>Overlayer.Module.StrictJudge</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DebugType>none</DebugType>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <NoWarn>CS0618;MSB3277;CS0168</NoWarn>
+    <GamePath Condition="'$(GamePath)' == ''">E:\SteamLibrary\steamapps\common\A Dance of Fire and Ice</GamePath>
+    <GameData Condition="'$(GameData)' == ''">A Dance of Fire and Ice_Data</GameData>
+    <Managed>$(GamePath)\$(GameData)\Managed</Managed>
+    <Libs>$(MSBuildProjectDirectory)\..\libs</Libs>
+    <OverlayerDll>$(MSBuildProjectDirectory)\..\Overlayer\Overlayer\bin\Release\netstandard2.1\Overlayer.dll</OverlayerDll>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="$(Managed)\UnityEngine.*.dll"><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(Managed)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Assembly-CSharp"><HintPath>$(Managed)\Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.IO.Compression"><HintPath>$(Managed)\System.IO.Compression.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(Managed)\Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="RDTools"><HintPath>$(Managed)\RDTools.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(Managed)\UnityModManager\0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Overlayer"><HintPath>$(OverlayerDll)</HintPath><Private>false</Private></Reference>
+    <Reference Include="O5Kit"><HintPath>$(Libs)\O5Kit.1.0.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,154 @@
+using Overlayer.Async;
+using Overlayer.Core;
+using Overlayer.Tag.Runtime;
+using System.Reflection;
+using static Overlayer.Overlay.OvObject;
+
+namespace Overlayer.Tag.Core;
+
+public static class TagManager {
+    static TagManager() {
+        ExprCore.TagLookupProvider = TryGet;
+    }
+
+    private static readonly object _lock = new();
+
+    private static readonly HashSet<Assembly> _registeredAssemblies = [];
+    private static volatile Dictionary<string, TagCore> _tags = [];
+
+    public static int Count => _tags.Count;
+
+    public static async Task RegisterAsync(Assembly asm) {
+        lock (_lock) {
+            if (_registeredAssemblies.Contains(asm)) {
+                MainCore.Log.Msg($"[{nameof(TagManager)}] Assembly '{asm.GetName().Name}' is already registered.");
+                return;
+            }
+            _registeredAssemblies.Add(asm);
+        }
+
+        MainCore.Log.Msg($"[{nameof(TagManager)}] Registration started for: {asm.GetName().Name}");
+        try {
+            var list = await TagLoader.LoadAsync(asm).ConfigureAwait(false);
+            await MainCore.V8.InitializationTask.ConfigureAwait(false);
+            MainCore.Log.Msg($"[{nameof(TagManager)}] Found tags in '{asm.GetName().Name}': {list.Count}");
+
+            if (list.Count == 0) {
+                return;
+            }
+
+            lock (_lock) {
+                var newDict = new Dictionary<string, TagCore>(_tags);
+                foreach (var tag in list) {
+                    newDict[tag.Name] = tag;
+                }
+                _tags = newDict;
+            }
+
+            TagCache.Instance.Clear();
+
+            MainCore.Log.Msg($"[{nameof(TagManager)}] Registration completed for '{asm.GetName().Name}'. Total tags: {_tags.Count}");
+            MainCore.V8.GenerateImplJs();
+            MainCore.V8.LoadImplJs();
+            MainThread.Enqueue(TextEngineUpdater.RecompileAll);
+        } catch (Exception e) {
+            MainCore.Log.Msg($"[{nameof(TagManager)}] Registration failed for '{asm.GetName().Name}': {e}");
+
+            lock (_lock) {
+                _registeredAssemblies.Remove(asm);
+            }
+        }
+    }
+
+    public static bool Register(TagCore[] tags) {
+        if (tags == null || tags.Length == 0) {
+            return false;
+        }
+
+        int registeredCount = 0;
+        lock (_lock) {
+            var newDict = new Dictionary<string, TagCore>(_tags);
+            foreach (var tag in tags) {
+                if (tag != null && !newDict.ContainsKey(tag.Name)) {
+                    newDict[tag.Name] = tag;
+                    registeredCount++;
+                }
+            }
+
+            if (registeredCount == 0) {
+                return false;
+            }
+
+            _tags = newDict;
+        }
+
+        TagCache.Instance.Clear();
+
+        MainCore.Log.Msg($"[{nameof(TagManager)}] {registeredCount} tags registered. Total tags: {_tags.Count}");
+
+        MainCore.V8.GenerateImplJs();
+        MainCore.V8.LoadImplJs();
+        MainThread.Enqueue(TextEngineUpdater.RecompileAll);
+
+        return true;
+    }
+
+    public static bool Unregister(string[] tagNames, bool recompile = true) {
+        if (tagNames == null || tagNames.Length == 0) {
+            return false;
+        }
+
+        int removedCount = 0;
+        lock (_lock) {
+            var newDict = new Dictionary<string, TagCore>(_tags);
+            foreach (var name in tagNames) {
+                if (newDict.Remove(name)) {
+                    removedCount++;
+                }
+            }
+
+            if (removedCount == 0) {
+                return false;
+            }
+
+            _tags = newDict;
+            MainCore.Log.Msg($"[{nameof(TagManager)}] {removedCount} tags unregistered. Total tags: {_tags.Count}");
+        }
+
+        TagCache.Instance.Clear();
+        if (recompile) {
+            MainThread.Enqueue(TextEngineUpdater.RecompileAll);
+        }
+
+        return true;
+    }
+
+    public static bool TryGet(string name, out TagCore tag)
+        => (LocalTagSet.Current != null && LocalTagSet.Current.TryGet(name, out tag)) || _tags.TryGetValue(name, out tag);
+
+    public static List<TagCore> GetAllTags() {
+        lock (_lock) {
+            return [.. _tags.Values];
+        }
+    }
+
+    public static void Set(TagCore tag) {
+        lock (_lock) {
+            Dictionary<string, TagCore> newMap = new(_tags) {
+                [tag.Name] = tag
+            };
+            _tags = newMap;
+        }
+        TagCache.Instance.Clear();
+        MainCore.Log.Msg($"[{nameof(TagManager)}] Tag updated: {tag.Name}");
+    }
+
+    public static void Dispose() {
+        lock (_lock) {
+            _tags = [];
+            _registeredAssemblies.Clear();
+        }
+        TagCache.Instance.Clear();
+        MainCore.Log.Msg($"[{nameof(TagManager)}] Disposed");
+    }
+}

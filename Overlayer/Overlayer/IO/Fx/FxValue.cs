@@ -1,0 +1,675 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Text;
+using Newtonsoft.Json.Linq;
+using Overlayer.Core;
+using Overlayer.IO.Interface;
+using Overlayer.TextEngine.Core;
+
+namespace Overlayer.IO.Fx;
+
+public interface IFxValue {
+    Type ValueType { get; }
+
+    bool UseFx { get; set; }
+
+    string Expression { get; set; }
+
+    bool HasFx { get; }
+
+    object EvaluateObject();
+
+    IFxValue CopyFx();
+
+    JToken SerializeFx();
+
+    void DeserializeFx(JToken token);
+}
+
+public abstract class FxValue {
+    private protected const string FxKey = "Fx";
+
+    // Bumped whenever any value's UseFx/Engine changes, so callers can cache
+    // "does this object have any Fx" instead of re-walking every value per frame.
+    private static int fxVersion;
+    internal static int FxVersion => Volatile.Read(ref fxVersion);
+    private protected static void BumpFxVersion() => Interlocked.Increment(ref fxVersion);
+
+    protected static readonly ConcurrentDictionary<Type, Func<string, object>> Converters = new();
+
+    protected static readonly ConcurrentDictionary<Type, Func<JToken, object>> RawReaders = new();
+
+    protected static readonly ConcurrentDictionary<Type, Func<object, JToken>> RawWriters = new();
+
+    public static void ClearConverters() {
+        Converters.Clear();
+        RawReaders.Clear();
+        RawWriters.Clear();
+        FxConverters.MarkUnregistered();
+    }
+
+    internal static string WrapJsBlock(string code) => "{\n" + (code ?? string.Empty) + "\n}";
+
+    internal static int JsBlockPrefixLength => 2;
+
+    internal static string SanitizeJsExpression(string code) {
+        if (string.IsNullOrEmpty(code)) {
+            return code;
+        }
+
+        bool dirty = false;
+        foreach (char c in code) {
+            if (c == '\u200B' || c == '\u200C' || c == '\u200D' || c == '\uFEFF') {
+                dirty = true;
+                break;
+            }
+        }
+
+        if (!dirty) {
+            return code;
+        }
+
+        var sb = new StringBuilder(code.Length);
+        foreach (char c in code) {
+            if (c != '\u200B' && c != '\u200C' && c != '\u200D' && c != '\uFEFF') {
+                sb.Append(c);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    internal static bool TryEvaluateJs(string code, out object result) {
+        result = null;
+        try {
+            var v8 = MainCore.V8;
+            if (v8 == null) {
+                return false;
+            }
+
+            return v8.TryEvaluateFx(SanitizeJsExpression(code), out result) && result != null;
+        } catch {
+            result = null;
+            return false;
+        }
+    }
+
+    internal static bool TryConvertScalar(Type targetType, string rendered) {
+        try {
+            return FxNumeric.TryEvaluate(rendered, targetType, out _);
+        } catch {
+            return false;
+        }
+    }
+
+    internal static bool TryConvertRegistered(Type targetType, string rendered) {
+        try {
+            if (!Converters.TryGetValue(targetType, out var converter)) {
+                return false;
+            }
+
+            converter(rendered);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    internal static bool TryConvertEnum(Type enumType, string rendered) {
+        var text = rendered?.Trim();
+        if (string.IsNullOrEmpty(text)) {
+            return false;
+        }
+
+        if (int.TryParse(text, out _)) {
+            return true;
+        }
+
+        try {
+            Enum.Parse(enumType, text, true);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    internal static float EvaluateNumericComponent(string expr) {
+        var text = SanitizeJsExpression(expr)?.Trim() ?? string.Empty;
+        if (float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var direct)) {
+            return direct;
+        }
+
+        if (FxNumeric.TryEvaluate(text, typeof(float), out var numeric) && numeric is float f) {
+            return f;
+        }
+
+        throw new FormatException($"Cannot evaluate '{expr}'.");
+    }
+}
+
+public sealed class FxValue<T> : FxValue, IFxValue, ISettingsFile, ICopyable<FxValue<T>>, IDisposable {
+    static FxValue() {
+        if (typeof(T).IsEnum) {
+            RegisterConverter(raw => {
+                if (string.IsNullOrWhiteSpace(raw)) return default!;
+                if (int.TryParse(raw, out var intVal)) return (T)Enum.ToObject(typeof(T), intVal);
+                try {
+                    return (T)Enum.Parse(typeof(T), raw, true);
+                } catch {
+                    return default!;
+                }
+            });
+            return;
+        }
+
+        Func<string, T> converter = Type.GetTypeCode(typeof(T)) switch {
+            TypeCode.Byte => s => byte.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.SByte => s => sbyte.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.Int16 => s => short.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.UInt16 => s => ushort.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.Int32 => s => int.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.UInt32 => s => uint.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.Int64 => s => long.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.UInt64 => s => ulong.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.Single => s => float.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.Double => s => double.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.Decimal => s => decimal.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.Boolean => s => bool.TryParse(s, out var v) ? (T)(object)v : default!,
+            TypeCode.String => s => (T)(object)s,
+            _ => null!
+        };
+
+        if (converter != null) {
+            RegisterConverter(converter);
+        }
+    }
+
+    public static void RegisterConverter(Func<string, T> converter) {
+        Converters[typeof(T)] = s => converter(s)!;
+    }
+
+    public static void RegisterRawReader(Func<JToken, T> reader) {
+        RawReaders[typeof(T)] = t => reader(t)!;
+    }
+
+    public static void RegisterRawWriter(Func<T, JToken> writer) {
+        RawWriters[typeof(T)] = o => writer((T)o);
+    }
+
+    private T staticValue = default!;
+
+    // Cached WrapJsBlock result keyed by the source string reference; a
+    // single immutable pair so a cross-thread read never sees a torn update.
+    private Tuple<string, string> wrappedJs;
+
+    // Per source text (by reference): the sanitized text and, for numeric
+    // types, its native program. Pure numeric JS skips V8 entirely; anything
+    // else (Tag proxies, statements, strings) still runs in V8 as before.
+    private sealed class Prepared(string source, string sanitized, Native.NativeExpression native) {
+        public readonly string Source = source;
+        public readonly string Sanitized = sanitized;
+        public readonly Native.NativeExpression Native = native;
+    }
+
+    private Prepared prepared;
+
+    private Tag.Core.LocalTagScope localTagScope;
+
+    /// <summary>Tags registered by this value's Fx code (<c>RegisterTag</c>); null when none.</summary>
+    public Tag.Core.LocalTagSet LocalTags => UseFx ? localTagScope?.Tags : null;
+
+    private Prepared Prepare(string source) {
+        var cached = prepared;
+        if (cached != null && ReferenceEquals(cached.Source, source)) {
+            return cached;
+        }
+
+        string sanitized = SanitizeJsExpression(source);
+        Native.NativeExpression native = null;
+        if (IsNumericType && !string.IsNullOrEmpty(sanitized)) {
+            nint handle = Native.OvJsExpr.Compile(sanitized.Trim());
+            if (handle != 0) {
+                native = new Native.NativeExpression(handle, js: true);
+            }
+        }
+        prepared = cached = new Prepared(source, sanitized, native);
+        return cached;
+    }
+
+    private static readonly bool IsNumericType = !typeof(T).IsEnum
+        && Type.GetTypeCode(typeof(T)) is >= TypeCode.SByte and <= TypeCode.Decimal;
+
+    private string GetWrappedJs(string rendered) {
+        var cached = wrappedJs;
+        if (cached != null && ReferenceEquals(cached.Item1, rendered)) {
+            return cached.Item2;
+        }
+
+        var wrapped = WrapJsBlock(rendered);
+        wrappedJs = Tuple.Create(rendered, wrapped);
+        return wrapped;
+    }
+
+    public T Value {
+        get => Evaluate();
+        set => staticValue = value;
+    }
+
+    public T StaticValue {
+        get => staticValue;
+        set => staticValue = value;
+    }
+
+    public TextEngineCore Engine {
+        get;
+        set {
+            field = value;
+            BumpFxVersion();
+        }
+    }
+
+    public bool UseFx {
+        get;
+        set {
+            field = value;
+            BumpFxVersion();
+        }
+    }
+
+    public bool HasFx => UseFx && Engine != null;
+
+    public string Expression {
+        get => Engine?.Text ?? string.Empty;
+        set {
+            Engine ??= new TextEngineCore();
+            Engine.Text = value ?? string.Empty;
+        }
+    }
+
+    #region IFxValue
+    Type IFxValue.ValueType => typeof(T);
+
+    string IFxValue.Expression {
+        get => Expression;
+        set => Expression = value;
+    }
+
+    object IFxValue.EvaluateObject() => Evaluate()!;
+
+    IFxValue IFxValue.CopyFx() => Copy();
+
+    JToken IFxValue.SerializeFx() => Serialize();
+
+    void IFxValue.DeserializeFx(JToken token) => Deserialize(token);
+    #endregion
+
+    #region Mode helpers
+    public void SetStatic(T value) {
+        staticValue = value;
+        UseFx = false;
+    }
+
+    public void SetExpression(string expression) {
+        Expression = expression ?? string.Empty;
+        UseFx = true;
+    }
+
+    public void DisableFx() => UseFx = false;
+
+    public void EnsureEngine() => Engine ??= new TextEngineCore();
+    #endregion
+
+    #region Constructors
+    public FxValue() { }
+
+    public FxValue(T value, TextEngineCore engine = null, bool useFx = false) {
+        staticValue = value;
+        Engine = engine;
+        UseFx = useFx;
+    }
+
+    public FxValue(string expression) {
+        UseFx = true;
+        Engine = new TextEngineCore { Text = expression };
+    }
+
+    public FxValue(string expression, TextEngineCore engine, bool useFx = true) {
+        Engine = engine ?? new TextEngineCore();
+        Engine.Text = expression;
+        UseFx = useFx;
+    }
+    #endregion
+
+    public T Evaluate() {
+        if (!UseFx || Engine == null) {
+            return staticValue;
+        }
+
+        var rendered = Engine.Text;
+        if (string.IsNullOrEmpty(rendered)) {
+            return staticValue;
+        }
+
+        Prepared prep = null;
+        if (typeof(T) != typeof(string)) {
+            prep = Prepare(rendered);
+            rendered = prep.Sanitized;
+            if (string.IsNullOrEmpty(rendered)) {
+                return staticValue;
+            }
+        }
+
+        var targetType = typeof(T);
+        var typeCode = Type.GetTypeCode(targetType);
+        if (targetType == typeof(string)) {
+            try {
+                var scope = localTagScope ??= new Tag.Core.LocalTagScope();
+                bool ok = false;
+                object jsResult = null;
+                scope.Begin();
+                try {
+                    ok = TryEvaluateJs(GetWrappedJs(rendered), out jsResult);
+                } finally {
+                    scope.End(ok);
+                }
+                if (ok && jsResult != null) {
+                    var text = Convert.ToString(jsResult, CultureInfo.InvariantCulture);
+                    if (!string.IsNullOrEmpty(text)) {
+                        return (T)(object)text;
+                    }
+                }
+            } catch {
+            }
+            return (T)(object)(Engine.Get() ?? rendered);
+        }
+        if (!targetType.IsEnum && (typeCode == TypeCode.Boolean || (typeCode >= TypeCode.SByte && typeCode <= TypeCode.Decimal))) {
+            // Same value V8 would return for `{ expr }`, narrowed like ClearScript.
+            if (prep?.Native != null && prep.Native.Evaluate(out double native)) {
+                try {
+                    return (T)Convert.ChangeType(Tag.Runtime.JsBatch.Narrow(native), targetType, CultureInfo.InvariantCulture);
+                } catch {
+                }
+            } else if (TryEvaluateJs(GetWrappedJs(rendered), out var jsResult)) {
+                try {
+                    return (T)Convert.ChangeType(jsResult, targetType, CultureInfo.InvariantCulture);
+                } catch {
+                }
+            }
+            try {
+                if (FxNumeric.TryEvaluate(rendered, targetType, out var numeric) && numeric != null) {
+                    return (T)numeric;
+                }
+                return staticValue;
+            } catch {
+                return staticValue;
+            }
+        }
+
+        if (!Converters.TryGetValue(targetType, out var converter))
+            throw new InvalidOperationException(
+                $"Type '{targetType.FullName}' requires a custom converter to be registered via FxValue<{targetType.Name}>.RegisterConverter().");
+        try {
+            var result = converter(rendered);
+            return result is T typedResult ? typedResult : staticValue;
+        } catch {
+            return staticValue;
+        }
+    }
+
+    // Safe serializer for primitive types, enums, collections, and custom objects.
+    // Bypasses reflection-emit JsonSerializer for basic types to avoid Mono/IL2CPP issues.
+    private static JToken SafeFromObject(object value) {
+        if (value == null) return JValue.CreateNull();
+        switch (value) {
+            case bool b: return new JValue(b);
+            case string s: return new JValue(s);
+            case int i: return new JValue(i);
+            case float f: return new JValue(f);
+            case double d: return new JValue(d);
+            case long l: return new JValue(l);
+            case short sh: return new JValue(sh);
+            case byte by: return new JValue(by);
+            case decimal dec: return new JValue(dec);
+            case System.Collections.IEnumerable enumerable when value is not string:
+                var arr = new JArray();
+                foreach (var item in enumerable) {
+                    arr.Add(SafeFromObject(item));
+                }
+                return arr;
+            default:
+                if (value.GetType().IsEnum) {
+                    return new JValue(value.ToString());
+                }
+                try {
+                    return JToken.FromObject(value);
+                } catch (Exception ex) {
+                    MainCore.Log?.Err($"[FxValue] SafeFromObject fallback failed for {value.GetType()}: {ex}");
+                    return JValue.CreateNull();
+                }
+        }
+    }
+
+    public FxValue<T> Copy() {
+        TextEngineCore newEngine = null;
+        if (Engine != null) {
+            newEngine = new TextEngineCore { Text = Engine.Text };
+        }
+
+        return new FxValue<T>(staticValue, newEngine, UseFx);
+    }
+
+    public JToken Serialize() {
+        if (!UseFx) {
+            if (staticValue == null) return JValue.CreateNull();
+            if (typeof(T).IsEnum) return new JValue(staticValue.ToString());
+            try {
+                if (RawWriters.TryGetValue(typeof(T), out var writer)) {
+                    return writer(staticValue);
+                }
+                if (staticValue is ISettingsFile file) {
+                    return file.Serialize();
+                }
+            } catch (Exception ex) {
+                MainCore.Log?.Err($"[FxValue] RawWriter failed for {typeof(T)}: {ex}");
+                return JValue.CreateNull();
+            }
+            return SafeFromObject(staticValue);
+        }
+
+        var obj = new JObject {
+            [FxKey] = Engine?.Text ?? string.Empty
+        };
+        try {
+            if (RawWriters.TryGetValue(typeof(T), out var writer)) {
+                obj["Value"] = writer(staticValue);
+            } else if (staticValue is ISettingsFile file) {
+                obj["Value"] = file.Serialize();
+            } else {
+                obj["Value"] = SafeFromObject(staticValue);
+            }
+        } catch {
+        }
+        return obj;
+    }
+
+    public void Deserialize(JToken token) {
+        if (token == null || token.Type == JTokenType.Null) {
+            UseFx = false;
+            // Never overwrite existing fallback with default! when JSON token is null
+            return;
+        }
+
+        if (token is JObject obj && obj.ContainsKey(FxKey)) {
+            UseFx = true;
+
+            var engineText = obj[FxKey]?.Value<string>() ?? string.Empty;
+            Engine ??= new TextEngineCore();
+            Engine.Text = engineText;
+            if (obj.ContainsKey("Value")) {
+                var valToken = obj["Value"];
+                if (valToken == null || valToken.Type == JTokenType.Null) return;
+                try {
+                    if (RawReaders.TryGetValue(typeof(T), out var raw)) {
+                        var r = raw(valToken);
+                        if (r is T typed) {
+                            staticValue = typed;
+                        }
+                    } else if (typeof(T) == typeof(bool)) {
+                        staticValue = (T)(object)valToken.Value<bool>();
+                    } else if (typeof(T) == typeof(string)) {
+                        staticValue = (T)(object)(valToken.Value<string>() ?? string.Empty);
+                    } else if (typeof(T) == typeof(float)) {
+                        staticValue = (T)(object)valToken.Value<float>();
+                    } else if (typeof(T) == typeof(double)) {
+                        staticValue = (T)(object)valToken.Value<double>();
+                    } else if (typeof(T) == typeof(int)) {
+                        staticValue = (T)(object)valToken.Value<int>();
+                    } else if (typeof(T) == typeof(long)) {
+                        staticValue = (T)(object)valToken.Value<long>();
+                    } else if (typeof(T).IsEnum) {
+                        if (valToken.Type == JTokenType.String) {
+                            try {
+                                staticValue = (T)Enum.Parse(typeof(T), valToken.Value<string>(), true);
+                            } catch { }
+                        } else if (valToken.Type == JTokenType.Integer) {
+                            staticValue = (T)Enum.ToObject(typeof(T), valToken.Value<int>());
+                        }
+                    } else if (typeof(T) == typeof(List<string>) && valToken is JArray jarr) {
+                        var list = new List<string>();
+                        foreach (var el in jarr) list.Add(el?.Value<string>() ?? string.Empty);
+                        staticValue = (T)(object)list;
+                    } else {
+                        staticValue = valToken.ToObject<T>()!;
+                    }
+                } catch {
+                }
+            }
+        } else {
+            UseFx = false;
+            try {
+                if (RawReaders.TryGetValue(typeof(T), out var raw)) {
+                    var r = raw(token);
+                    if (r is T typed) {
+                        staticValue = typed;
+                        return;
+                    }
+                }
+                if (typeof(T) == typeof(bool)) {
+                    staticValue = (T)(object)token.Value<bool>();
+                    return;
+                }
+                if (typeof(T) == typeof(string)) {
+                    staticValue = (T)(object)(token.Value<string>() ?? string.Empty);
+                    return;
+                }
+                if (typeof(T) == typeof(float)) {
+                    staticValue = (T)(object)token.Value<float>();
+                    return;
+                }
+                if (typeof(T) == typeof(double)) {
+                    staticValue = (T)(object)token.Value<double>();
+                    return;
+                }
+                if (typeof(T) == typeof(int)) {
+                    staticValue = (T)(object)token.Value<int>();
+                    return;
+                }
+                if (typeof(T) == typeof(long)) {
+                    staticValue = (T)(object)token.Value<long>();
+                    return;
+                }
+                if (typeof(T).IsEnum) {
+                    if (token.Type == JTokenType.String) {
+                        try {
+                            staticValue = (T)Enum.Parse(typeof(T), token.Value<string>(), true);
+                            return;
+                        } catch { }
+                    } else if (token.Type == JTokenType.Integer) {
+                        staticValue = (T)Enum.ToObject(typeof(T), token.Value<int>());
+                        return;
+                    }
+                }
+                if (typeof(T) == typeof(List<string>) && token is JArray jarr) {
+                    var list = new List<string>();
+                    foreach (var el in jarr) list.Add(el?.Value<string>() ?? string.Empty);
+                    staticValue = (T)(object)list;
+                    return;
+                }
+                staticValue = token.ToObject<T>()!;
+            } catch {
+                // Keep existing staticValue on error
+            }
+        }
+    }
+
+    public void Dispose() {
+        Engine?.Dispose();
+        Engine = null;
+    }
+
+    #region Operators
+    public static implicit operator FxValue<T>(T value) => new(value);
+
+    public static implicit operator T(FxValue<T> fx) => fx == null ? default! : fx.Value;
+    #endregion
+
+    public override string ToString() {
+        if (UseFx && Engine != null) {
+            return Engine.Get() ?? staticValue?.ToString() ?? string.Empty;
+        }
+
+        return staticValue?.ToString() ?? string.Empty;
+    }
+
+    #region Factory Methods
+    public static FxValue<T> FromValue(T value) => new(value);
+
+    public static FxValue<T> FromExpression(string expression) => new(expression);
+
+    public static FxValue<T> Create(T value, TextEngineCore engine, bool useFx = true)
+        => new(value, engine, useFx);
+
+    public static FxValue<T> Create(string expression, TextEngineCore engine, bool useFx = true)
+        => new(expression, engine, useFx);
+    #endregion
+}
+
+public static class FxUtil {
+    // Delegate-free variant of ApplyIfChanged for per-frame paths: callers
+    // write `if(Changed(ref cache, value)) target = cache;` so no closure is
+    // allocated each tick.
+    public static bool Changed<T>(ref T cache, T current) {
+        if (EqualityComparer<T>.Default.Equals(cache, current)) {
+            return false;
+        }
+
+        cache = current;
+        return true;
+    }
+
+    public static bool ApplyIfChanged<T>(ref T cache, T current, Action<T> apply) {
+        if (EqualityComparer<T>.Default.Equals(cache, current)) {
+            return false;
+        }
+
+        cache = current;
+        apply(current);
+        return true;
+    }
+
+    public static bool HasFx(IFxValue fx) => fx != null && fx.HasFx;
+
+    public static bool HasAnyFx(IEnumerable<IFxValue> values) {
+        if (values == null) {
+            return false;
+        }
+
+        foreach (var v in values) {
+            if (v != null && v.HasFx) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}

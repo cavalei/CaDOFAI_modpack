@@ -1,0 +1,127 @@
+using Overlayer.Compat;
+using Overlayer.Tag.Core;
+using UnityEngine.SceneManagement;
+
+#if ML && IL2CPP
+using Il2CppInterop.Runtime;
+#endif
+
+namespace Overlayer.TagImpl;
+
+public static class Unity {
+    static Unity() {
+        SceneManager.sceneLoaded +=
+#if ML && IL2CPP
+            new Action<Scene, LoadSceneMode>((scene, mode) => SceneName = scene.name);
+#else
+            (scene, mode) => SceneName = scene.name;
+#endif
+
+        SceneName = SceneManager.GetActiveScene().name;
+    }
+
+    [Tag(Desc = "[Unity] Name of the currently active Unity scene")]
+    public static string SceneName { get; private set; } = string.Empty;
+
+    [Tag(Desc = "[Unity] Current screen width in pixels")]
+    public static int ScreenWidth => UnityEngine.Screen.width;
+
+    [Tag(Desc = "[Unity] Current screen height in pixels")]
+    public static int ScreenHeight => UnityEngine.Screen.height;
+
+#pragma warning disable CS0618
+    [Tag(Desc = "[Unity] Current target refresh rate of the monitor")]
+    public static int RefreshRate => UnityEngine.Screen.currentResolution.refreshRate;
+#pragma warning restore CS0618
+
+    [Tag(Desc = "[Unity] Returns true if the game is in fullscreen mode")]
+    public static bool IsFullScreen => UnityEngine.Screen.fullScreen;
+
+    [Tag(Desc = "[Unity] Current Time.timeScale value")]
+    public static float TimeScale => UnityEngine.Time.timeScale;
+
+    [Tag(Desc = "[Unity] Total time elapsed since game start, in seconds")]
+    public static double TimeSinceStart => UnityTimeCompat.UnscaledTimeAsDouble;
+
+    [Tag(Desc = "[Unity] Time in seconds since the last frame\n(affected by timeScale)")]
+    public static float DeltaTime => UnityEngine.Time.deltaTime;
+
+    [Tag(Desc = "[Unity] Unscaled time in seconds since the last frame\n(unaffected by timeScale)")]
+    public static float UnscaledDeltaTime => UnityEngine.Time.unscaledDeltaTime;
+
+    [Tag(Desc = "[Unity] Time in seconds since the start of the frame\n(affected by timeScale)")]
+    public static double Time => UnityTimeCompat.TimeAsDouble;
+
+    [Tag(Desc = "[Unity] Interval in seconds at which physics\nand other fixed frame rate updates are performed")]
+    public static float FixedDeltaTime => UnityEngine.Time.fixedDeltaTime;
+
+    [Tag(Desc = "[Unity] Time in seconds since the last fixed update\n(affected by timeScale)")]
+    public static float FixedTime => (float)Overlayer.Compat.UnityTimeCompat.FixedTimeAsDouble;
+
+    [Tag(Desc = "[Unity] Total number of frames that have passed since game start")]
+    public static int FrameCount => UnityEngine.Time.frameCount;
+
+    [Tag(Desc = "[Unity] Maximum time a frame can take\n(prevents physics spiral of death)")]
+    public static float MaximumDeltaTime => UnityEngine.Time.maximumDeltaTime;
+
+    [Tag(Desc = "[Unity] Returns true if the application window currently has focus")]
+    public static bool IsFocused => UnityEngine.Application.isFocused;
+
+    [Tag(Desc = "[Unity] Unity engine version")]
+    public static string UnityVersion => unityVersion ??= UnityEngine.Application.unityVersion;
+
+    // Constant for the process lifetime; cached to avoid a new string per frame.
+    private static string unityVersion, operatingSystem, deviceModel, graphicsDeviceType;
+    private static string[] qualityNames;
+
+    [Tag(Desc = "[Unity] Returns true if the mouse cursor is currently visible")]
+    public static bool IsCursorVisible => UnityEngine.Cursor.visible;
+
+    [Tag(Desc = "[Unity] Current cursor lock state (None, Locked, Confined)")]
+    public static string CursorLockState => UnityEngine.Cursor.lockState switch {
+        UnityEngine.CursorLockMode.None => "None",
+        UnityEngine.CursorLockMode.Locked => "Locked",
+        UnityEngine.CursorLockMode.Confined => "Confined",
+        var mode => mode.ToString()
+    };
+
+    [Tag(Desc = "[Unity] Currently applied Quality Level index")]
+    public static int QualityLevel => UnityEngine.QualitySettings.GetQualityLevel();
+
+    [Tag(Desc = "[Unity] Currently applied Quality Level name")]
+    public static string QualityName {
+        get {
+            // QualitySettings.names allocates a new array per call.
+            var names = qualityNames ??= UnityEngine.QualitySettings.names;
+            int level = UnityEngine.QualitySettings.GetQualityLevel();
+            return level >= 0 && level < names.Length ? names[level] : (qualityNames = UnityEngine.QualitySettings.names)[level];
+        }
+    }
+
+    [Tag(Desc = "[Unity] VSync count setting\n(0: Disabled, 1: Every VSync, 2: Every second VSync)")]
+    public static int VSyncCount => UnityEngine.QualitySettings.vSyncCount;
+
+    [Tag(Desc = "[Unity] Target frame rate set in QualitySettings (-1 if uncapped)")]
+    public static int TargetFrameRate => UnityEngine.Application.targetFrameRate;
+
+    [Tag(Desc = "[Unity] DPI (dots per inch) of the current screen")]
+    public static float ScreenDpi => UnityEngine.Screen.dpi;
+
+    [Tag(Desc = "[Unity] Master volume of the AudioListener (0.0 to 1.0)")]
+    public static float MasterVolume => UnityEngine.AudioListener.volume;
+
+    [Tag(Desc = "[Unity] Returns true if all audio in the game is currently muted")]
+    public static bool IsAudioMuted => UnityEngine.AudioListener.pause;
+
+    [Tag(Desc = "[Unity] Operating system version and build info")]
+    public static string OperatingSystem => operatingSystem ??= UnityEngine.SystemInfo.operatingSystem;
+
+    [Tag(Desc = "[Unity] Device model name")]
+    public static string DeviceModel => deviceModel ??= UnityEngine.SystemInfo.deviceModel;
+
+    [Tag(Desc = "[Unity] Graphics API type (Direct3D11, Vulkan, Metal, etc.)")]
+    public static string GraphicsDeviceType => graphicsDeviceType ??= UnityEngine.SystemInfo.graphicsDeviceType.ToString();
+
+    [Tag(Desc = "[Unity] Max supported texture size in pixels")]
+    public static int MaxTextureSize => UnityEngine.SystemInfo.maxTextureSize;
+}

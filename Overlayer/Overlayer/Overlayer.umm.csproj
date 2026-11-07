@@ -1,0 +1,95 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Overlayer 的 UnityModManager（UMM）构建工程。
+    与上游 Overlayer.csproj 并行存在：上游走 MelonLoader，本工程走 UMM。
+    编译常量 UMM 可用来区分两边。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <AssemblyName>Overlayer</AssemblyName>
+    <RootNamespace>Overlayer</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefineConstants>$(DefineConstants);UMM</DefineConstants>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <DebugType>none</DebugType>
+    <Deterministic>true</Deterministic>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <NoWarn>CS0618;CS0414;CS0649;CS0169;CS0162;CS0219;CS8632;CS8981</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <GamePath Condition="'$(GamePath)' == ''">E:\SteamLibrary\steamapps\common\A Dance of Fire and Ice</GamePath>
+    <GameData Condition="'$(GameData)' == ''">A Dance of Fire and Ice_Data</GameData>
+    <Managed>$(GamePath)\$(GameData)\Managed</Managed>
+    <UmmDir>$(Managed)\UnityModManager</UmmDir>
+    <Libs>$(MSBuildProjectDirectory)\..\..\libs</Libs>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="**\*.cs" Exclude="bin\**;obj\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 游戏自带托管程序集：排除框架本体，避免顶掉 netstandard 引用程序集 -->
+    <GameAsm Include="$(Managed)\*.dll"
+             Exclude="$(Managed)\mscorlib.dll;$(Managed)\netstandard.dll;$(Managed)\System*.dll;$(Managed)\Microsoft.CSharp.dll;$(Managed)\Microsoft.VisualBasic*.dll;$(Managed)\Mono.*.dll;$(Managed)\I18N*.dll" />
+    <Reference Include="@(GameAsm)">
+      <Private>false</Private>
+    </Reference>
+
+    <!-- UnityModManager 本体与 Harmony -->
+    <Reference Include="UnityModManager">
+      <HintPath>$(UmmDir)\UnityModManager.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(UmmDir)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- 第三方依赖（从 Mods\OverlayerUMM 拷到 libs） -->
+    <Reference Include="O5Kit.1.0">
+      <HintPath>$(Libs)\O5Kit.1.0.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ClearScript.Core">
+      <HintPath>$(Libs)\ClearScript.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ClearScript.V8">
+      <HintPath>$(Libs)\ClearScript.V8.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="FuzzySharp">
+      <HintPath>$(Libs)\FuzzySharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Esprima">
+      <HintPath>$(Libs)\Esprima.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="NativeFileDialog.Extended">
+      <HintPath>$(Libs)\NativeFileDialog.Extended.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 仅为编译期满足 ClearScript 7.5.1 的程序集版本要求；不参与输出、不打进 jar -->
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="9.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resource\Embedded\**\*" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,1274 @@
+using Overlayer.Compat;
+using Overlayer.Async;
+using Overlayer.Core;
+using Overlayer.IO.User;
+using Overlayer.IO.User.Impl;
+using Overlayer.Localization;
+using Overlayer.Overlay;
+using Overlayer.Package;
+using Overlayer.Resource;
+using O5Kit.Factory;
+using O5Kit.Control;
+using O5Kit.Behaviour;
+using Overlayer.UI.Utility;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
+
+#if ML && IL2CPP
+using Il2CppInterop.Runtime;
+using Il2CppTMPro;
+#else
+using TMPro;
+#endif
+
+namespace Overlayer.UI.Factory.Page;
+
+internal static class PageResources {
+    private static O5InputField pathInput;
+    private static O5InputField keyInput;
+    private static O5Button modeButton;
+    private static O5InputField searchInput;
+    private static O5Toggle mipChainToggle;
+    private static O5Toggle linearToggle;
+    private static RectTransform imageSettingsRow;
+    private static O5SpriteEditor spriteEditor;
+    private static O5Button browseButton;
+    private static O5Button addButton;
+    private static TextMeshProUGUI statusLabel;
+    private static TextMeshProUGUI titleLabel;
+    private static RectTransform listContent;
+    private static RectTransform listViewport;
+    private static string settingsEditKey;
+    private static string spriteEditorKey;
+    private static GameObject disabledPanel;
+    private static bool busy;
+
+    private enum ResourceMode { Images, Fonts }
+    private static ResourceMode currentMode = ResourceMode.Images;
+    private static readonly HashSet<string> collapsedFolders = new(StringComparer.Ordinal);
+
+    public static void Create(RectTransform parent) {
+        RectTransform root = CreateStretch(parent, "ResourcesRoot");
+
+        RectTransform titleRow = CreateContainer(root, "TitleRow");
+        titleRow.anchorMin = new Vector2(0f, 1f);
+        titleRow.anchorMax = new Vector2(1f, 1f);
+        titleRow.offsetMin = new Vector2(24f, -62f);
+        titleRow.offsetMax = new Vector2(-24f, -12f);
+
+        titleLabel = CreateText(titleRow, T("IMAGE_RESOURCES", "Image Resources"), 30f, TextAlignmentOptions.Left);
+        titleLabel.rectTransform.anchorMin = new Vector2(0f, 0f);
+        titleLabel.rectTransform.anchorMax = new Vector2(1f, 1f);
+        titleLabel.rectTransform.offsetMin = new Vector2(0f, 0f);
+        titleLabel.rectTransform.offsetMax = new Vector2(-190f, 0f);
+        titleLabel.raycastTarget = true;
+        titleLabel.gameObject.AddComponent<TextLocalization>().Init("IMAGE_RESOURCES", "Image Resources");
+
+        modeButton = O5Factory.Button(O5KitAdapters.Ctx, titleRow, "resource_mode", new O5ButtonOptions { Text = T("RESOURCE_MODE_IMAGES", "Images"), OnClick = ToggleMode });
+        PlaceRight(modeButton.Rect, 174f);
+        modeButton.Label.gameObject.AddComponent<TextLocalization>().Init("RESOURCE_MODE_IMAGES", "Images");
+
+        RectTransform importCard = CreateContainer(root, "ImportRows");
+        importCard.anchorMin = new Vector2(0f, 1f);
+        importCard.anchorMax = new Vector2(1f, 1f);
+        importCard.offsetMin = new Vector2(12f, -260f);
+        importCard.offsetMax = new Vector2(-12f, -78f);
+
+        RectTransform pathRow = CreateRow(importCard, 8f);
+        pathInput = O5Factory.Input(O5KitAdapters.Ctx, pathRow, "resource_image_path", new O5InputOptions { DefaultValue = string.Empty, Value = string.Empty, OnChanged = _ => { }, Placeholder = T("IMAGE_PATH", "Image path") });
+        pathInput.Placeholder.gameObject.AddComponent<TextLocalization>().Init("IMAGE_PATH", "Image path");
+        pathInput.Rect.AddToolTip(O5KitAdapters.Ctx, () => MainCore.Tr.Get(
+            "IMAGE_PATH_TOOLTIP",
+            "Select image file to import."
+        ));
+        ResizeInput(pathInput.Rect, 190f);
+
+        browseButton = O5Factory.Button(O5KitAdapters.Ctx, pathRow, "resource_browse", new O5ButtonOptions { Text = T("BROWSE", "Browse"), OnClick = BeginBrowse });
+        PlaceRight(browseButton.Rect, 174f);
+        browseButton.Label.gameObject.AddComponent<TextLocalization>().Init("BROWSE", "Browse");
+
+        RectTransform keyRow = CreateRow(importCard, 66f);
+        keyInput = O5Factory.Input(O5KitAdapters.Ctx, keyRow, "resource_image_name", new O5InputOptions { DefaultValue = string.Empty, Value = string.Empty, OnChanged = _ => { }, Placeholder = "Resource name" });
+        keyInput.Placeholder.gameObject.AddComponent<TextLocalization>().Init("RESOURCE_NAME", "Resource name");
+        keyInput.Rect.AddToolTip(O5KitAdapters.Ctx, () => MainCore.Tr.Get(
+            "RESOURCE_NAME_TOOLTIP",
+            "Name used by Image components to reference this resource. Use folder/name to put it in a folder."
+        ));
+        ResizeInput(keyInput.Rect, 190f);
+
+        addButton = O5Factory.Button(O5KitAdapters.Ctx, keyRow, "resource_add", new O5ButtonOptions { Text = T("ADD_IMAGE", "Add Image"), OnClick = BeginImport });
+        PlaceRight(addButton.Rect, 174f);
+        addButton.Label.gameObject.AddComponent<TextLocalization>().Init("ADD_IMAGE", "Add Image");
+
+        RectTransform settingsRow = CreateRow(importCard, 124f);
+        imageSettingsRow = settingsRow;
+        mipChainToggle = O5Factory.Toggle(O5KitAdapters.Ctx, settingsRow, "resource_mip_chain", new O5ToggleOptions { DefaultValue = false, Value = false, OnChanged = _ => { }, Text = T("MIP_CHAIN", "Mip Chain") });
+        PlaceHalf(mipChainToggle.Rect, false);
+        mipChainToggle.Rect.AddToolTip(O5KitAdapters.Ctx, () => MainCore.Tr.Get(
+            "MIP_CHAIN_TOOLTIP",
+            "Create mip levels for smoother minified rendering."
+        ));
+        mipChainToggle.Label.gameObject.AddComponent<TextLocalization>().Init("MIP_CHAIN", "Mip Chain");
+
+        linearToggle = O5Factory.Toggle(O5KitAdapters.Ctx, settingsRow, "resource_linear", new O5ToggleOptions { DefaultValue = false, Value = false, OnChanged = _ => { }, Text = T("LINEAR", "Linear") });
+        PlaceHalf(linearToggle.Rect, true);
+        linearToggle.Rect.AddToolTip(O5KitAdapters.Ctx, () => MainCore.Tr.Get(
+            "LINEAR_TOOLTIP",
+            "Load texture data as linear color instead of sRGB."
+        ));
+        linearToggle.Label.gameObject.AddComponent<TextLocalization>().Init("LINEAR", "Linear");
+
+        statusLabel = CreateText(root, T("READY", "Ready"), 15f, TextAlignmentOptions.Left);
+        statusLabel.color = new Color(1f, 1f, 1f, 0.55f);
+        statusLabel.rectTransform.anchorMin = new Vector2(0f, 1f);
+        statusLabel.rectTransform.anchorMax = new Vector2(1f, 1f);
+        statusLabel.rectTransform.offsetMin = new Vector2(24f, -296f);
+        statusLabel.rectTransform.offsetMax = new Vector2(-24f, -268f);
+
+        RectTransform searchRow = CreateRow(root, 0f);
+        searchRow.anchorMin = new Vector2(0f, 1f);
+        searchRow.anchorMax = new Vector2(1f, 1f);
+        searchRow.offsetMin = new Vector2(18f, -352f);
+        searchRow.offsetMax = new Vector2(-18f, -302f);
+        searchInput = O5Factory.Input(O5KitAdapters.Ctx, searchRow, "resource_search", new O5InputOptions { DefaultValue = string.Empty, Value = string.Empty, OnChanged = _ => BuildList(), Placeholder = T("SEARCH_RESOURCE", "Search resources"), Icon = MainCore.Spr.Get(UISprite.MagnifyingGlass128) });
+        searchInput.Placeholder.gameObject.AddComponent<TextLocalization>().Init("SEARCH_RESOURCE", "Search resources");
+        searchInput.Rect.AddToolTip(O5KitAdapters.Ctx, () => MainCore.Tr.Get(
+            "SEARCH_RESOURCE_TOOLTIP",
+            "Filter resources by name."
+        ));
+        searchInput.Rect.offsetMax = Vector2.zero;
+
+        var (viewportRect, contentRect, _) = O5Factory.ScrollView(O5KitAdapters.Ctx,
+            root,
+            8f,
+            viewportOffsetMin: new Vector2(18f, 18f),
+            viewportOffsetMax: new Vector2(-18f, -366f),
+            contentPadding: new RectOffset { left = 0, right = 0, top = 0, bottom = 12 });
+        listViewport = viewportRect;
+        listContent = contentRect;
+
+        CreateDisabledPanel(root);
+        MainCore.OnModEnabledChanged += (isEnabled, isDispose) => {
+            if (!isDispose) {
+                ToggleUIStateByMod(isEnabled);
+            }
+        };
+        ToggleUIStateByMod(MainCore.IsModEnabled);
+
+        BuildList();
+        MainThread.Enqueue(() => {
+            BuildList();
+            Canvas.ForceUpdateCanvases();
+            if (listContent) {
+                LayoutRebuilder.ForceRebuildLayoutImmediate(listContent);
+            }
+        });
+    }
+
+    private static void BeginBrowse() {
+        if (busy) {
+            return;
+        }
+
+        browseButton.SetBlocked(true);
+        browseButton.Label.text = "...";
+        SetStatus("OPENING_FILE_PICKER", "Opening file picker...", UIColors.ObjectActive);
+
+        if (currentMode == ResourceMode.Images) {
+            _ = NativeImageFilePicker.PickAsync().ContinueWith(task => {
+                MainThread.Enqueue(() => {
+                    if (!MainCore.IsModEnabled) {
+                        return;
+                    }
+
+                    browseButton.SetBlocked(false);
+                    browseButton.Label.text = T("BROWSE", "Browse");
+                    string path = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
+                    if (string.IsNullOrWhiteSpace(path)) {
+                        SetStatus("NO_IMAGE_SELECTED", "No image selected.", UIColors.ObjectActiveMathWarn);
+                        return;
+                    }
+
+                    pathInput.Set(path);
+                    if (string.IsNullOrWhiteSpace(keyInput.Value)) {
+                        keyInput.Set(Path.GetFileNameWithoutExtension(path));
+                    }
+                    SetStatus("IMAGE_SELECTED_ADD_IMAGE", "Image selected. Choose Add Image.", UIColors.ObjectActive);
+                });
+            });
+        } else {
+            _ = NativeFontFilePicker.PickAsync().ContinueWith(task => {
+                MainThread.Enqueue(() => {
+                    if (!MainCore.IsModEnabled) {
+                        return;
+                    }
+
+                    browseButton.SetBlocked(false);
+                    browseButton.Label.text = T("BROWSE", "Browse");
+                    string path = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
+                    if (string.IsNullOrWhiteSpace(path)) {
+                        SetStatus("NO_FONT_SELECTED", "No font selected.", UIColors.ObjectActiveMathWarn);
+                        return;
+                    }
+
+                    pathInput.Set(path);
+                    if (string.IsNullOrWhiteSpace(keyInput.Value)) {
+                        keyInput.Set(Path.GetFileNameWithoutExtension(path));
+                    }
+                    SetStatus("FONT_SELECTED_ADD_FONT", "Font selected. Choose Add Font.", UIColors.ObjectActive);
+                });
+            });
+        }
+    }
+
+    private static void BeginImport() {
+        if (busy) {
+            return;
+        }
+
+        if (currentMode == ResourceMode.Images) {
+            if (!string.IsNullOrEmpty(settingsEditKey)) {
+                BeginSettingsApply();
+                return;
+            }
+            string source = UserResourceManager.FromUser(pathInput.Value?.Trim());
+            var (key, folder) = SplitName(keyInput.Value);
+
+            if (string.IsNullOrWhiteSpace(source)) {
+                SetStatus("CHOOSE_IMAGE_FIRST", "Choose an image first.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(key)) {
+                SetStatus("ENTER_RESOURCE_NAME", "Enter a resource name.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+            if (O5cpFormat.IsPackageKey(key) || UserResourceManager.T2D.Keys.Contains(key) || UserResourceManager.Spr.Keys.Contains(key)) {
+                SetStatus("RESOURCE_NAME_ALREADY_EXISTS", "Resource name already exists.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+            if (!UserTexture2D.Ext.Contains(Path.GetExtension(source).ToLowerInvariant())) {
+                SetStatus("UNSUPPORTED_IMAGE_FORMAT", "Unsupported image format.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+
+            busy = true;
+            pathInput.SetBlocked(true);
+            keyInput.SetBlocked(true);
+            browseButton.SetBlocked(true);
+            addButton.SetBlocked(true);
+            addButton.Label.text = T("LOADING", "Loading...");
+            SetStatus("READING_IMAGE", "Reading image...", UIColors.ObjectActive);
+
+            string extension = Path.GetExtension(source).ToLowerInvariant();
+            string target = Path.Combine(MainCore.Paths.UserImagePath, key + extension);
+            _ = Task.Run(() => {
+                try {
+                    Directory.CreateDirectory(MainCore.Paths.UserImagePath);
+                    byte[] bytes = File.ReadAllBytes(source);
+                    File.WriteAllBytes(target, bytes);
+                    return (Bytes: bytes, Path: target, Error: string.Empty);
+                } catch (Exception e) {
+                    return (Bytes: (byte[])null, Path: target, Error: e.Message);
+                }
+            }).ContinueWith(task => MainThread.Enqueue(() => FinishImport(task, key, folder)));
+        } else {
+            // Fonts
+            string source = UserResourceManager.FromUser(pathInput.Value?.Trim());
+            var (key, folder) = SplitName(keyInput.Value);
+
+            if (string.IsNullOrWhiteSpace(source)) {
+                SetStatus("CHOOSE_FONT_FIRST", "Choose a font first.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(key)) {
+                SetStatus("ENTER_RESOURCE_NAME", "Enter a resource name.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+            if (O5cpFormat.IsPackageKey(key) || UserResourceManager.Fnt.Keys.Contains(key)) {
+                SetStatus("RESOURCE_NAME_ALREADY_EXISTS", "Resource name already exists.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+            if (!UserFont.Ext.Contains(Path.GetExtension(source).ToLowerInvariant())) {
+                SetStatus("UNSUPPORTED_FONT_FORMAT", "Unsupported font format.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+
+            busy = true;
+            pathInput.SetBlocked(true);
+            keyInput.SetBlocked(true);
+            browseButton.SetBlocked(true);
+            addButton.SetBlocked(true);
+            addButton.Label.text = T("LOADING", "Loading...");
+            SetStatus("READING_FONT", "Reading font...", UIColors.ObjectActive);
+
+            string extension = Path.GetExtension(source).ToLowerInvariant();
+            string target = Path.Combine(MainCore.Paths.UserFontPath, key + extension);
+            _ = Task.Run(() => {
+                try {
+                    Directory.CreateDirectory(MainCore.Paths.UserFontPath);
+                    byte[] bytes = File.ReadAllBytes(source);
+                    File.WriteAllBytes(target, bytes);
+                    return (Path: target, Bytes: bytes, Error: string.Empty);
+                } catch (Exception e) {
+                    return (Path: string.Empty, Bytes: (byte[])null, Error: e.Message);
+                }
+            }).ContinueWith(task => MainThread.Enqueue(() => FinishFontImport(task, key, folder)));
+        }
+    }
+
+    private static void FinishImport(
+        Task<(byte[] Bytes, string Path, string Error)> task,
+        string key,
+        string folder
+    ) {
+        if (!MainCore.IsModEnabled) {
+            return;
+        }
+
+        var result = task.Status == TaskStatus.RanToCompletion
+            ? task.Result
+            : (Bytes: (byte[])null, Path: string.Empty, Error: "Image read task failed.");
+        if (result.Bytes == null) {
+            FinishBusy();
+            SetStatus("IMPORT_FAILED", "Import failed: {0}", UIColors.ObjectActiveMathErr, result.Error);
+            return;
+        }
+
+        UserTexture2D.Result textureResult = UserResourceManager.T2D.LoadData(
+            key,
+            result.Path,
+            result.Bytes,
+            mipChainToggle?.Value ?? false,
+            linearToggle?.Value ?? false
+        );
+        if (textureResult != UserTexture2D.Result.Success ||
+            !UserResourceManager.T2D.TryGet(key, out var textureValue)) {
+            FinishBusy();
+            SetStatus("IMAGE_LOAD_FAILED", "Image load failed: {0}", UIColors.ObjectActiveMathErr, textureResult);
+            return;
+        }
+
+        UserSprite.Result spriteResult = UserResourceManager.Spr.Load(
+            key,
+            key,
+            new Rect(0f, 0f, textureValue.texture.width, textureValue.texture.height),
+            new Vector2(0.5f, 0.5f),
+            100f,
+            Vector4.zero,
+            out _
+        );
+        if (spriteResult != UserSprite.Result.Success) {
+            UserResourceManager.T2D.Remove(key);
+            FinishBusy();
+            SetStatus("SPRITE_CREATION_FAILED", "Sprite creation failed: {0}", UIColors.ObjectActiveMathErr, spriteResult);
+            return;
+        }
+
+        SetFolder(UserResourceManager.Config.Data.ImageFolders, key, folder);
+        UserResourceManager.Config.RequestSave(50);
+        O5KitAdapters.RefreshFonts();
+        pathInput.Set(string.Empty);
+        keyInput.Set(string.Empty);
+        FinishBusy();
+        BuildList();
+        SetStatus($"Added {key}.", UIColors.ObjectActiveMathOk);
+    }
+
+    private static void FinishFontImport(
+        Task<(string Path, byte[] Bytes, string Error)> task,
+        string key,
+        string folder
+    ) {
+        if (!MainCore.IsModEnabled) {
+            return;
+        }
+
+        var result = task.Status == TaskStatus.RanToCompletion
+            ? task.Result
+            : (Path: string.Empty, Bytes: (byte[])null, Error: "Font read task failed.");
+        if (result.Bytes == null) {
+            FinishBusy();
+            SetStatus("IMPORT_FAILED", "Import failed: {0}", UIColors.ObjectActiveMathErr, result.Error);
+            return;
+        }
+
+        var fontResult = UserResourceManager.Fnt.Load(key, result.Path);
+        if (fontResult != UserFont.Result.Success || !UserResourceManager.Fnt.TryGet(key, out _)) {
+            FinishBusy();
+            SetStatus("FONT_LOAD_FAILED", "Font load failed: {0}", UIColors.ObjectActiveMathErr, fontResult);
+            return;
+        }
+
+        SetFolder(UserResourceManager.Config.Data.FontFolders, key, folder);
+        UserResourceManager.Config.RequestSave(50);
+        pathInput.Set(string.Empty);
+        keyInput.Set(string.Empty);
+        FinishBusy();
+        BuildList();
+        SetStatus($"Added {key}.", UIColors.ObjectActiveMathOk);
+    }
+
+    private static void FinishBusy() {
+        busy = false;
+        pathInput.SetBlocked(false);
+        keyInput.SetBlocked(false);
+        browseButton.SetBlocked(false);
+        addButton.SetBlocked(false);
+        addButton.Label.text = currentMode == ResourceMode.Images ? T("ADD_IMAGE", "Add Image") : T("ADD_FONT", "Add Font");
+    }
+
+    private static void EnsureSpriteEditor() {
+        if (spriteEditor != null) {
+            return;
+        }
+
+        spriteEditor = O5SpriteEditor.Create(O5KitAdapters.Ctx, UICore.CanvasObj.transform, new O5SpriteEditorOptions {
+            HintEmpty = T("SPRITE_EDITOR_HINT", "Drag the green guides to set 9-slice borders."),
+            ValuesFormat = MainCore.Tr.Get("SPRITE_EDITOR_VALUES", "L {0}  R {1}  B {2}  T {3}"),
+            LeftLabel = T("SPRITE_BORDER_LEFT", "Left"),
+            RightLabel = T("SPRITE_BORDER_RIGHT", "Right"),
+            BottomLabel = T("SPRITE_BORDER_BOTTOM", "Bottom"),
+            TopLabel = T("SPRITE_BORDER_TOP", "Top"),
+            CancelLabel = T("CANCEL", "Cancel"),
+            ApplyLabel = T("APPLY_SETTINGS", "Apply Settings"),
+        });
+        spriteEditor.Applied += OnSpriteEditorApplied;
+    }
+
+    private static void OpenSpriteEditor(string key) {
+        if (busy || !UserResourceManager.T2D.TryGet(key, out var textureValue)) {
+            return;
+        }
+
+        EnsureSpriteEditor();
+        spriteEditorKey = key;
+        Vector4 border = UserResourceManager.Spr.TryGet(key, out var spriteValue)
+            ? spriteValue.settings.Border
+            : Vector4.zero;
+        spriteEditor.Open(textureValue.texture, border, $"{T("SPRITE_EDITOR", "Sprite Editor")} — {key}");
+    }
+
+    private static void CloseSpriteEditor() {
+        spriteEditorKey = null;
+        spriteEditor?.Close();
+    }
+
+    private static void OnSpriteEditorApplied(Vector4 border) {
+        string key = spriteEditorKey;
+        if (
+            busy ||
+            string.IsNullOrEmpty(key) ||
+            !UserResourceManager.T2D.TryGet(key, out var textureValue) ||
+            !UserResourceManager.Spr.TryGet(key, out var spriteValue)
+        ) {
+            return;
+        }
+
+        border = NormalizeBorder(border, textureValue.texture.width, textureValue.texture.height);
+        if (Approximately(spriteValue.settings.Border, border)) {
+            CloseSpriteEditor();
+            SetStatus("SETTINGS_UNCHANGED", "Settings unchanged.", UIColors.ObjectActive);
+            return;
+        }
+
+        if (!UserResourceManager.Spr.UpdateBorder(key, border)) {
+            SetStatus("SPRITE_REBUILD_FAILED", "Sprite rebuild failed.", UIColors.ObjectActiveMathErr);
+            return;
+        }
+
+        UserResourceManager.Config.RequestSave(50);
+        OverlayCore.RequestLayoutRefresh();
+        CloseSpriteEditor();
+        BuildList();
+        SetStatus("SPRITE_SETTINGS_APPLIED", "Sprite settings applied.", UIColors.ObjectActiveMathOk);
+    }
+
+
+    private static Vector4 NormalizeBorder(Vector4 border, int width, int height) {
+        float left = Mathf.Clamp(border.x, 0f, width);
+        float right = Mathf.Clamp(border.z, 0f, width - left);
+        float bottom = Mathf.Clamp(border.y, 0f, height);
+        float top = Mathf.Clamp(border.w, 0f, height - bottom);
+        return new Vector4(left, bottom, right, top);
+    }
+
+    private static bool Approximately(Vector4 left, Vector4 right) => (left - right).sqrMagnitude < 0.0001f;
+
+    private static void BeginSettingsApply() {
+        if (busy) {
+            return;
+        }
+
+        string key = settingsEditKey;
+        if (
+            string.IsNullOrEmpty(key) ||
+            !UserResourceManager.T2D.TryGetPath(key, out string path) ||
+            !File.Exists(path)
+        ) {
+            SetStatus("IMAGE_FILE_NOT_FOUND", "Image file not found.", UIColors.ObjectActiveMathErr);
+            return;
+        }
+
+        bool mipChain = mipChainToggle.Value;
+        bool linear = linearToggle.Value;
+        Vector4 border = UserResourceManager.Spr.TryGet(key, out var spriteValue)
+            ? spriteValue.settings.Border
+            : Vector4.zero;
+        if (
+            UserResourceManager.T2D.TryGet(key, out var current) &&
+            current.settings.MipChain == mipChain &&
+            current.settings.Linear == linear
+        ) {
+            SetStatus("SETTINGS_UNCHANGED", "Settings unchanged.", UIColors.ObjectActive);
+            CancelSettingsEdit();
+            return;
+        }
+
+        busy = true;
+        browseButton.SetBlocked(true);
+        addButton.SetBlocked(true);
+        addButton.Label.text = T("APPLYING", "Applying...");
+        SetStatus("READING_IMAGE", "Reading image...", UIColors.ObjectActive);
+
+        _ = Task.Run(() => {
+            try {
+                return (Bytes: File.ReadAllBytes(path), Error: string.Empty);
+            } catch (Exception e) {
+                return (Bytes: (byte[])null, Error: e.Message);
+            }
+        }).ContinueWith(task => MainThread.Enqueue(() => FinishSettingsApply(task, key, mipChain, linear, border)));
+    }
+
+    private static void FinishSettingsApply(
+        Task<(byte[] Bytes, string Error)> task,
+        string key,
+        bool mipChain,
+        bool linear,
+        Vector4 border
+    ) {
+        if (!MainCore.IsModEnabled) {
+            return;
+        }
+
+        var (Bytes, Error) = task.Status == TaskStatus.RanToCompletion
+            ? task.Result
+            : (Bytes: (byte[])null, Error: "Image read task failed.");
+        if (Bytes == null) {
+            FinishSettingsBusy();
+            SetStatus("SETTINGS_FAILED", "Settings failed: {0}", UIColors.ObjectActiveMathErr, Error);
+            return;
+        }
+
+        UserTexture2D.Result textureResult = UserResourceManager.T2D.ReplaceData(
+            key,
+            Bytes,
+            mipChain,
+            linear
+        );
+        if (
+            textureResult != UserTexture2D.Result.Success ||
+            !UserResourceManager.T2D.TryGet(key, out var textureValue)
+        ) {
+            FinishSettingsBusy();
+            SetStatus("SETTINGS_FAILED", "Settings failed: {0}", UIColors.ObjectActiveMathErr, textureResult);
+            return;
+        }
+
+        if (
+            UserResourceManager.Spr.TryGet(key, out _) &&
+            !UserResourceManager.Spr.RebuildTexture(key, textureValue.texture)
+        ) {
+            FinishSettingsBusy();
+            SetStatus("SPRITE_REBUILD_FAILED", "Sprite rebuild failed.", UIColors.ObjectActiveMathErr);
+            return;
+        }
+
+        border = NormalizeBorder(border, textureValue.texture.width, textureValue.texture.height);
+        if (
+            UserResourceManager.Spr.TryGet(key, out _) &&
+            !UserResourceManager.Spr.UpdateBorder(key, border)
+        ) {
+            FinishSettingsBusy();
+            SetStatus("SPRITE_REBUILD_FAILED", "Sprite rebuild failed.", UIColors.ObjectActiveMathErr);
+            return;
+        }
+
+        UserResourceManager.Config.RequestSave(50);
+        OverlayCore.RequestLayoutRefresh();
+        busy = false;
+        CancelSettingsEdit();
+        BuildList();
+        SetStatus("TEXTURE_SETTINGS_APPLIED", "Texture settings applied.", UIColors.ObjectActiveMathOk);
+    }
+
+    private static void FinishSettingsBusy() {
+        busy = false;
+        browseButton.SetBlocked(false);
+        addButton.SetBlocked(false);
+        addButton.Label.text = T("APPLY_SETTINGS", "Apply Settings");
+    }
+
+    private static void EnterSettingsEdit(string key) {
+        if (busy || !UserResourceManager.T2D.TryGet(key, out var textureValue)) {
+            return;
+        }
+
+        if (!UserResourceManager.T2D.TryGetPath(key, out string path)) {
+            return;
+        }
+
+        settingsEditKey = key;
+        pathInput.Set(UserResourceManager.ToUser(path));
+        keyInput.Set(key);
+        pathInput.SetBlocked(true);
+        keyInput.SetBlocked(true);
+        browseButton.OnClick = CancelSettingsEdit;
+        browseButton.Label.text = T("CANCEL", "Cancel");
+        addButton.Label.text = T("APPLY_SETTINGS", "Apply Settings");
+        mipChainToggle.Set(textureValue.settings.MipChain);
+        linearToggle.Set(textureValue.settings.Linear);
+        SetStatus("EDITING_TEXTURE_SETTINGS", "Editing {0} texture settings.", UIColors.ObjectActive, key);
+    }
+
+    private static void CancelSettingsEdit() {
+        if (busy) {
+            return;
+        }
+
+        settingsEditKey = null;
+        pathInput.Set(string.Empty);
+        keyInput.Set(string.Empty);
+        mipChainToggle.Set(false);
+        linearToggle.Set(false);
+        pathInput.SetBlocked(false);
+        keyInput.SetBlocked(false);
+        browseButton.OnClick = BeginBrowse;
+        FinishBusy();
+        browseButton.Label.text = T("BROWSE", "Browse");
+    }
+
+    private static void BuildList() {
+        if (listContent == null) {
+            return;
+        }
+
+        for (int i = listContent.childCount - 1; i >= 0; i--) {
+            UnityEngine.Object.Destroy(listContent.GetChild(i).gameObject);
+        }
+
+        string query = searchInput?.Value?.Trim() ?? string.Empty;
+        Dictionary<string, string> folders = CurrentFolders;
+        string[] keys = [.. (currentMode == ResourceMode.Images ? UserResourceManager.Spr.Keys : UserResourceManager.Fnt.Keys)
+            .Where(key => !O5cpFormat.IsPackageKey(key))
+            .Where(key => string.IsNullOrEmpty(query) || FullName(folders, key).IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
+            .OrderBy(key => FolderOf(folders, key), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(key => key, StringComparer.OrdinalIgnoreCase)];
+
+        if (keys.Length == 0) {
+            string text = currentMode == ResourceMode.Images
+                ? T("NO_IMAGES_YET", "No images yet. Add one above.")
+                : T("NO_FONTS_YET", "No fonts yet. Add one above.");
+            TextMeshProUGUI empty = CreateText(listContent, text, 18f, TextAlignmentOptions.Center);
+            empty.color = new Color(1f, 1f, 1f, 0.45f);
+            LayoutElement element = empty.gameObject.AddComponent<LayoutElement>();
+            element.minHeight = 100f;
+            element.preferredHeight = 100f;
+        } else {
+            // Unfiled resources sort first and get no header.
+            foreach (var group in keys.GroupBy(key => FolderOf(folders, key))) {
+                string folder = group.Key;
+                string collapseId = $"{currentMode}:{folder}";
+                bool collapsed = folder.Length > 0 && query.Length == 0 && collapsedFolders.Contains(collapseId);
+                if (folder.Length > 0) {
+                    FolderHeader.Create(listContent, folder, group.Count(), collapsed, () => {
+                        if (!collapsedFolders.Remove(collapseId)) {
+                            collapsedFolders.Add(collapseId);
+                        }
+                        BuildList();
+                    }, "resource_folder_" + collapseId);
+                }
+                if (collapsed) {
+                    continue;
+                }
+                foreach (string key in group) {
+                    if (currentMode == ResourceMode.Images) {
+                        CreateCard(listContent, key);
+                    } else {
+                        CreateFontCard(listContent, key);
+                    }
+                }
+            }
+        }
+        LayoutRebuilder.ForceRebuildLayoutImmediate(listContent);
+    }
+
+    private static void ToggleMode() {
+        currentMode = currentMode == ResourceMode.Images ? ResourceMode.Fonts : ResourceMode.Images;
+        titleLabel.text = T(
+            currentMode == ResourceMode.Images ? "IMAGE_RESOURCES" : "FONT_RESOURCES",
+            currentMode == ResourceMode.Images ? "Image Resources" : "Font Resources"
+        );
+        titleLabel.GetComponent<TextLocalization>()?.Init(
+            currentMode == ResourceMode.Images ? "IMAGE_RESOURCES" : "FONT_RESOURCES",
+            currentMode == ResourceMode.Images ? "Image Resources" : "Font Resources"
+        );
+
+        if (currentMode == ResourceMode.Images) {
+            pathInput.Placeholder.GetComponent<TextLocalization>()?.Init("IMAGE_PATH", "Image path");
+            pathInput.Rect.AddToolTip(O5KitAdapters.Ctx, () => MainCore.Tr.Get("IMAGE_PATH_TOOLTIP", "Select image file to import."));
+            modeButton.Label.GetComponent<TextLocalization>()?.Init("RESOURCE_MODE_IMAGES", "Images");
+            modeButton.Label.text = T("RESOURCE_MODE_IMAGES", "Images");
+        } else {
+            pathInput.Placeholder.GetComponent<TextLocalization>()?.Init("FONT_PATH", "Font path");
+            pathInput.Rect.AddToolTip(O5KitAdapters.Ctx, () => MainCore.Tr.Get("FONT_PATH_TOOLTIP", "Select font file to import."));
+            modeButton.Label.GetComponent<TextLocalization>()?.Init("RESOURCE_MODE_FONTS", "Fonts");
+            modeButton.Label.text = T("RESOURCE_MODE_FONTS", "Fonts");
+        }
+
+        addButton.Label.GetComponent<TextLocalization>()?.Init(
+            currentMode == ResourceMode.Images ? "ADD_IMAGE" : "ADD_FONT",
+            currentMode == ResourceMode.Images ? "Add Image" : "Add Font"
+        );
+        addButton.Label.text = currentMode == ResourceMode.Images ? T("ADD_IMAGE", "Add Image") : T("ADD_FONT", "Add Font");
+
+        imageSettingsRow?.gameObject.SetActive(currentMode == ResourceMode.Images);
+
+        BuildList();
+    }
+
+    private static void ToggleUIStateByMod(bool isEnabled) {
+        if (disabledPanel == null) {
+            return;
+        }
+
+        disabledPanel.SetActive(!isEnabled);
+        if (!isEnabled) {
+            busy = false;
+            CloseSpriteEditor();
+            CancelSettingsEdit();
+            BuildList();
+            O5KitAdapters.Ctx.Tooltip.Hide();
+            return;
+        }
+        MainThread.Enqueue(() => {
+            if (!MainCore.IsModEnabled) {
+                return;
+            }
+
+            BuildList();
+            Canvas.ForceUpdateCanvases();
+            if (listContent) {
+                LayoutRebuilder.ForceRebuildLayoutImmediate(listContent);
+            }
+        });
+    }
+
+    private static void CreateDisabledPanel(RectTransform parent) {
+        disabledPanel = new GameObject("DisabledResourcesPanel");
+        disabledPanel.transform.SetParent(parent, false);
+
+        RectTransform rect = disabledPanel.AddComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+
+        Image image = disabledPanel.AddComponent<Image>();
+        image.color = UIColors.PanelBG;
+        image.raycastTarget = true;
+
+        TextMeshProUGUI message = CreateText(disabledPanel.transform, T("ONLY_AVAILABLE_WHEN_ENABLED", "Only available when the Mod is Enabled!"), 24f, TextAlignmentOptions.Center);
+        message.rectTransform.anchorMin = Vector2.zero;
+        message.rectTransform.anchorMax = Vector2.one;
+        message.rectTransform.offsetMin = Vector2.zero;
+        message.rectTransform.offsetMax = Vector2.zero;
+        message.gameObject.AddComponent<TextLocalization>().Init(
+            "ONLY_AVAILABLE_WHEN_ENABLED",
+            "Only available when the Mod is Enabled!"
+        );
+
+        disabledPanel.SetActive(false);
+    }
+
+    private static void CreateCard(Transform parent, string key) {
+        if (!UserResourceManager.Spr.TryGet(key, out var spriteValue)) {
+            return;
+        }
+        Dictionary<string, string> folders = UserResourceManager.Config.Data.ImageFolders;
+
+        GameObject cardObject = new(key);
+        cardObject.transform.SetParent(parent, false);
+        RectTransform card = cardObject.AddComponent<RectTransform>();
+        LayoutElement cardElement = cardObject.AddComponent<LayoutElement>();
+        cardElement.minHeight = 112f;
+        cardElement.preferredHeight = 112f;
+        Image background = cardObject.AddComponent<Image>();
+        background.sprite = MainCore.Spr.Get(UISliceSprite.Circle256P2048);
+        background.type = Image.Type.Sliced;
+        background.color = UIColors.ObjectBG;
+
+        GameObject thumbnailObject = new("Thumbnail");
+        thumbnailObject.transform.SetParent(card, false);
+        RectTransform thumbnailRect = thumbnailObject.AddComponent<RectTransform>();
+        thumbnailRect.anchorMin = new Vector2(0f, 0.5f);
+        thumbnailRect.anchorMax = new Vector2(0f, 0.5f);
+        thumbnailRect.pivot = new Vector2(0f, 0.5f);
+        thumbnailRect.anchoredPosition = new Vector2(12f, 0f);
+        thumbnailRect.sizeDelta = new Vector2(88f, 88f);
+        Image thumbnail = thumbnailObject.AddComponent<Image>();
+        thumbnail.sprite = spriteValue.sprite;
+        thumbnail.preserveAspect = true;
+        thumbnail.color = Color.white;
+        thumbnail.raycastTarget = false;
+
+        TextMeshProUGUI name = CreateText(card, key, 20f, TextAlignmentOptions.Left);
+        name.rectTransform.anchorMin = new Vector2(0f, 0.5f);
+        name.rectTransform.anchorMax = new Vector2(1f, 1f);
+        name.rectTransform.offsetMin = new Vector2(116f, -4f);
+        name.rectTransform.offsetMax = new Vector2(-466f, -12f);
+        name.font = MainCore.Res.Get<TMP_FontAsset>(Asset.SUIT_Medium);
+
+        O5InputField renameInput = O5Factory.Input(O5KitAdapters.Ctx, card, "rename_" + key, new O5InputOptions { DefaultValue = key, Value = key, OnChanged = _ => { }, Placeholder = T("RESOURCE_NAME", "Resource name") });
+        renameInput.Rect.anchorMin = new Vector2(0f, 0.5f);
+        renameInput.Rect.anchorMax = new Vector2(1f, 1f);
+        renameInput.Rect.offsetMin = new Vector2(116f, -4f);
+        renameInput.Rect.offsetMax = new Vector2(-466f, -12f);
+        renameInput.Rect.gameObject.SetActive(false);
+
+        string path = string.Empty;
+        UserResourceManager.T2D.TryGetPath(key, out path);
+        TextMeshProUGUI details = CreateText(
+            card,
+            $"{spriteValue.sprite.texture.width} × {spriteValue.sprite.texture.height}\n{UserResourceManager.ToUser(path)}",
+            14f,
+            TextAlignmentOptions.Left
+        );
+        details.color = new Color(1f, 1f, 1f, 0.5f);
+        details.rectTransform.anchorMin = new Vector2(0f, 0f);
+        details.rectTransform.anchorMax = new Vector2(1f, 0.5f);
+        details.rectTransform.offsetMin = new Vector2(116f, 14f);
+        details.rectTransform.offsetMax = new Vector2(-466f, 0f);
+
+        O5Button spriteEditor = O5Factory.Button(O5KitAdapters.Ctx, card, "sprite_editor_" + key, new O5ButtonOptions { Text = T("SPRITE_EDITOR", "Sprite Editor"), OnClick = () => OpenSpriteEditor(key) });
+        PlaceRight(spriteEditor.Rect, 134f, 54f, 340f);
+        spriteEditor.Label.fontSize = 14f;
+        spriteEditor.Label.gameObject.AddComponent<TextLocalization>().Init("SPRITE_EDITOR", "Sprite Editor");
+
+        O5Button settings = O5Factory.Button(O5KitAdapters.Ctx, card, "settings_" + key, new O5ButtonOptions { Text = T("SETTINGS", "Settings"), OnClick = () => EnterSettingsEdit(key) });
+        PlaceRight(settings.Rect, 100f, 54f, 232f);
+        settings.Label.fontSize = 15f;
+        settings.Label.gameObject.AddComponent<TextLocalization>().Init("SETTINGS", "Settings");
+
+        O5Button rename = O5Factory.Button(O5KitAdapters.Ctx, card, "rename_button_" + key, new O5ButtonOptions { Text = "Rename", OnClick = () => { } });
+        PlaceRight(rename.Rect, 100f, 54f, 124f);
+        rename.Label.fontSize = 15f;
+        rename.Label.gameObject.AddComponent<TextLocalization>().Init("RENAME", "Rename");
+
+        O5Button remove = O5Factory.Button(O5KitAdapters.Ctx, card, "remove_" + key, new O5ButtonOptions { Text = "Remove", OnClick = () => { } });
+        PlaceRight(remove.Rect, 100f, 54f, 16f);
+        remove.Label.fontSize = 15f;
+        remove.Label.gameObject.AddComponent<TextLocalization>().Init("REMOVE", "Remove");
+        bool confirm = false;
+        bool editing = false;
+        rename.OnClick = () => {
+            if (!editing) {
+                editing = true;
+                confirm = false;
+                name.gameObject.SetActive(false);
+                renameInput.Set(FullName(folders, key), false);
+                renameInput.Rect.gameObject.SetActive(true);
+                rename.Label.text = T("SAVE", "Save");
+                rename.NormalColor = UIColors.ObjectActive;
+                rename.UpdateVisual();
+                remove.Label.text = T("CANCEL", "Cancel");
+                remove.NormalColor = UIColors.ObjectButton;
+                remove.UpdateVisual();
+                renameInput.InputField.Select();
+                renameInput.InputField.ActivateInputField();
+                return;
+            }
+
+            var (newKey, newFolder) = SplitName(renameInput.Value);
+            if (string.Equals(key, newKey, StringComparison.Ordinal)) {
+                if (MoveFolder(folders, key, newFolder)) {
+                    BuildList();
+                }
+                return;
+            }
+            if (Rename(key, newKey)) {
+                folders.Remove(key);
+                SetFolder(folders, newKey, newFolder);
+                SetStatus("RENAMED_RESOURCE", "Renamed {0}.", UIColors.ObjectActiveMathOk, key);
+                BuildList();
+            }
+        };
+        remove.OnClick = () => {
+            if (editing) {
+                editing = false;
+                renameInput.Rect.gameObject.SetActive(false);
+                name.gameObject.SetActive(true);
+                rename.Label.text = T("RENAME", "Rename");
+                rename.NormalColor = UIColors.ObjectButton;
+                rename.UpdateVisual();
+                remove.Label.text = T("REMOVE", "Remove");
+                return;
+            }
+
+            if (!confirm) {
+                confirm = true;
+                remove.Label.text = T("CONFIRM", "Confirm");
+                remove.NormalColor = UIColors.SoftRed;
+                remove.UpdateVisual();
+                return;
+            }
+            Remove(key);
+        };
+
+        O5Effects.HoverOutline(O5KitAdapters.Ctx, cardObject, cardObject.AddComponent<EventTrigger>());
+    }
+
+    private static void CreateFontCard(Transform parent, string key) {
+        if (!UserResourceManager.Fnt.TryGet(key, out var fontAsset)) {
+            return;
+        }
+        Dictionary<string, string> folders = UserResourceManager.Config.Data.FontFolders;
+
+        GameObject cardObject = new(key);
+        cardObject.transform.SetParent(parent, false);
+        RectTransform card = cardObject.AddComponent<RectTransform>();
+        LayoutElement cardElement = cardObject.AddComponent<LayoutElement>();
+        cardElement.minHeight = 112f;
+        cardElement.preferredHeight = 112f;
+        Image background = cardObject.AddComponent<Image>();
+        background.sprite = MainCore.Spr.Get(UISliceSprite.Circle256P2048);
+        background.type = Image.Type.Sliced;
+        background.color = UIColors.ObjectBG;
+
+        TextMeshProUGUI sample = CreateText(card, T("SAMPLE_TEXT", "The quick brown fox jumps over the lazy dog"), 20f, TextAlignmentOptions.Left);
+        sample.gameObject.AddComponent<TextLocalization>().Init("SAMPLE_TEXT", "The quick brown fox jumps over the lazy dog");
+        sample.rectTransform.anchorMin = new Vector2(0f, 0.5f);
+        sample.rectTransform.anchorMax = new Vector2(1f, 1f);
+        sample.rectTransform.offsetMin = new Vector2(16f, -4f);
+        sample.rectTransform.offsetMax = new Vector2(-324f, -12f);
+        sample.font = fontAsset;
+
+        TextMeshProUGUI name = CreateText(card, key, 20f, TextAlignmentOptions.Left);
+        name.rectTransform.anchorMin = new Vector2(0f, 0.35f);
+        name.rectTransform.anchorMax = new Vector2(1f, 0.65f);
+        name.rectTransform.offsetMin = new Vector2(16f, 8f);
+        name.rectTransform.offsetMax = new Vector2(-324f, -8f);
+        name.font = MainCore.Res.Get<TMP_FontAsset>(Asset.SUIT_Medium);
+
+        O5InputField renameInput = O5Factory.Input(O5KitAdapters.Ctx, card, "rename_" + key, new O5InputOptions { DefaultValue = key, Value = key, OnChanged = _ => { }, Placeholder = T("RESOURCE_NAME", "Resource name") });
+        renameInput.Rect.anchorMin = new Vector2(0f, 0.35f);
+        renameInput.Rect.anchorMax = new Vector2(1f, 0.65f);
+        renameInput.Rect.offsetMin = new Vector2(16f, 8f);
+        renameInput.Rect.offsetMax = new Vector2(-324f, -8f);
+        renameInput.Rect.gameObject.SetActive(false);
+
+        string path = string.Empty;
+        UserResourceManager.Fnt.TryGetPath(key, out path);
+        TextMeshProUGUI details = CreateText(
+            card,
+            UserResourceManager.ToUser(path),
+            14f,
+            TextAlignmentOptions.Left
+        );
+        details.color = new Color(1f, 1f, 1f, 0.5f);
+        details.rectTransform.anchorMin = new Vector2(0f, 0f);
+        details.rectTransform.anchorMax = new Vector2(1f, 0.35f);
+        details.rectTransform.offsetMin = new Vector2(16f, 8f);
+        details.rectTransform.offsetMax = new Vector2(-324f, -4f);
+
+        O5Button rename = O5Factory.Button(O5KitAdapters.Ctx, card, "rename_button_" + key, new O5ButtonOptions { Text = "Rename", OnClick = () => { } });
+        PlaceRight(rename.Rect, 100f, 54f, 108f);
+        rename.Label.fontSize = 15f;
+        rename.Label.gameObject.AddComponent<TextLocalization>().Init("RENAME", "Rename");
+
+        O5Button remove = O5Factory.Button(O5KitAdapters.Ctx, card, "remove_" + key, new O5ButtonOptions { Text = "Remove", OnClick = () => { } });
+        PlaceRight(remove.Rect, 100f, 54f);
+        remove.Label.fontSize = 15f;
+        remove.Label.gameObject.AddComponent<TextLocalization>().Init("REMOVE", "Remove");
+        bool confirm = false;
+        bool editing = false;
+        rename.OnClick = () => {
+            if (!editing) {
+                editing = true;
+                confirm = false;
+                name.gameObject.SetActive(false);
+                renameInput.Set(FullName(folders, key), false);
+                renameInput.Rect.gameObject.SetActive(true);
+                rename.Label.text = T("SAVE", "Save");
+                rename.NormalColor = UIColors.ObjectActive;
+                rename.UpdateVisual();
+                remove.Label.text = T("CANCEL", "Cancel");
+                remove.NormalColor = UIColors.ObjectButton;
+                remove.UpdateVisual();
+                renameInput.InputField.Select();
+                renameInput.InputField.ActivateInputField();
+                return;
+            }
+
+            var (newKey, newFolder) = SplitName(renameInput.Value);
+            if (string.IsNullOrWhiteSpace(newKey)) {
+                SetStatus("ENTER_RESOURCE_NAME", "Enter a resource name.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+            if (string.Equals(key, newKey, StringComparison.Ordinal)) {
+                if (MoveFolder(folders, key, newFolder)) {
+                    BuildList();
+                }
+                return;
+            }
+            if (O5cpFormat.IsPackageKey(newKey) || UserResourceManager.Fnt.Keys.Contains(newKey)) {
+                SetStatus("RESOURCE_NAME_ALREADY_EXISTS", "Resource name already exists.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+
+            if (!UserResourceManager.Fnt.TryRenameKey(key, newKey)) {
+                SetStatus("RESOURCE_RENAME_FAILED", "Resource rename failed.", UIColors.ObjectActiveMathErr);
+                return;
+            }
+
+            folders.Remove(key);
+            SetFolder(folders, newKey, newFolder);
+            UserResourceManager.Config.RequestSave(50);
+            SetStatus("RENAMED_RESOURCE_TO", "Renamed {0} to {1}.", UIColors.ObjectActiveMathOk, key, newKey);
+            BuildList();
+        };
+        remove.OnClick = () => {
+            if (editing) {
+                editing = false;
+                renameInput.Rect.gameObject.SetActive(false);
+                name.gameObject.SetActive(true);
+                rename.Label.text = T("RENAME", "Rename");
+                rename.NormalColor = UIColors.ObjectButton;
+                rename.UpdateVisual();
+                remove.Label.text = T("REMOVE", "Remove");
+                return;
+            }
+
+            if (!confirm) {
+                confirm = true;
+                remove.Label.text = T("CONFIRM", "Confirm");
+                remove.NormalColor = UIColors.SoftRed;
+                remove.UpdateVisual();
+                return;
+            }
+
+            string filePath = path;
+            UserResourceManager.Fnt.Remove(key);
+            O5KitAdapters.RefreshFonts();
+            UserResourceManager.Config.RequestSave(50);
+            BuildList();
+            SetStatus("RESOURCE_REMOVED", "Removed {0}.", UIColors.ObjectActiveMathOk, key);
+
+            if (!string.IsNullOrEmpty(filePath) && filePath.StartsWith(MainCore.Paths.UserFontPath, StringComparison.OrdinalIgnoreCase)) {
+                _ = Task.Run(() => {
+                    try {
+                        if (File.Exists(filePath)) {
+                            File.Delete(filePath);
+                        }
+                    } catch { }
+                });
+            }
+        };
+
+        O5Effects.HoverOutline(O5KitAdapters.Ctx, cardObject, cardObject.AddComponent<EventTrigger>());
+    }
+
+    private static bool Rename(string oldKey, string newKey) {
+        if (string.IsNullOrWhiteSpace(newKey)) {
+            SetStatus("ENTER_RESOURCE_NAME", "Enter a resource name.", UIColors.ObjectActiveMathErr);
+            return false;
+        }
+        if (string.Equals(oldKey, newKey, StringComparison.Ordinal)) {
+            SetStatus("NAME_UNCHANGED", "Name unchanged.", UIColors.ObjectActive);
+            return false;
+        }
+        if (O5cpFormat.IsPackageKey(newKey)) {
+            SetStatus("RESOURCE_NAME_ALREADY_EXISTS", "Resource name already exists.", UIColors.ObjectActiveMathErr);
+            return false;
+        }
+        if (
+            UserResourceManager.T2D.Keys.Contains(newKey) ||
+            UserResourceManager.Spr.Keys.Contains(newKey)
+        ) {
+            SetStatus("RESOURCE_NAME_ALREADY_EXISTS", "Resource name already exists.", UIColors.ObjectActiveMathErr);
+            return false;
+        }
+
+        bool hasTexture = UserResourceManager.T2D.Keys.Contains(oldKey);
+        bool hasSprite = UserResourceManager.Spr.Keys.Contains(oldKey);
+        bool textureRenamed = !hasTexture ||
+            UserResourceManager.T2D.TryRenameKey(oldKey, newKey);
+        bool spriteRenamed = !hasSprite ||
+            UserResourceManager.Spr.TryRenameKey(oldKey, newKey);
+
+        if (!textureRenamed || !spriteRenamed) {
+            if (hasTexture && textureRenamed) {
+                UserResourceManager.T2D.TryRenameKey(newKey, oldKey);
+            }
+            SetStatus("RESOURCE_RENAME_FAILED", "Resource rename failed.", UIColors.ObjectActiveMathErr);
+            return false;
+        }
+
+        if (hasTexture) {
+            UserResourceManager.Spr.RenameTextureKey(oldKey, newKey);
+        }
+        if (!hasTexture && !hasSprite) {
+            SetStatus("RESOURCE_NOT_FOUND", "Resource not found.", UIColors.ObjectActiveMathErr);
+            return false;
+        }
+
+        UserResourceManager.Config.RequestSave(50);
+        return true;
+    }
+
+    private static void Remove(string key) {
+        string path = string.Empty;
+        UserResourceManager.T2D.TryGetPath(key, out path);
+        UserResourceManager.Spr.Remove(key);
+        bool textureUsedElsewhere = UserResourceManager.Spr.TryGetKey(
+            value => string.Equals(value.textureKey, key, StringComparison.Ordinal),
+            out _
+        );
+        if (!textureUsedElsewhere) {
+            UserResourceManager.T2D.Remove(key);
+        }
+        UserResourceManager.Config.RequestSave(50);
+        BuildList();
+        SetStatus("RESOURCE_REMOVED", "Removed {0}.", UIColors.ObjectActiveMathOk, key);
+
+        if (path.StartsWith(MainCore.Paths.UserImagePath, StringComparison.OrdinalIgnoreCase)) {
+            _ = Task.Run(() => {
+                try {
+                    if (File.Exists(path)) {
+                        File.Delete(path);
+                    }
+                } catch { }
+            });
+        }
+    }
+
+    private static Dictionary<string, string> CurrentFolders => currentMode == ResourceMode.Images
+        ? UserResourceManager.Config.Data.ImageFolders
+        : UserResourceManager.Config.Data.FontFolders;
+
+    private static string FolderOf(Dictionary<string, string> folders, string key) => UserResourceSettings.FolderOf(folders, key);
+
+    private static string FullName(Dictionary<string, string> folders, string key) => UserResourceSettings.FullName(folders, key);
+
+    /// <summary>"ui/icons/heart" -> ("heart", "ui/icons"). Keys never contain '/', so the split is unambiguous.</summary>
+    private static (string Key, string Folder) SplitName(string value) {
+        value = value?.Trim() ?? string.Empty;
+        int slash = value.LastIndexOfAny(['/', '\\']);
+        if (slash < 0) {
+            return (SanitizeKey(value), string.Empty);
+        }
+        string folder = string.Join("/", value[..slash]
+            .Split(['/', '\\'])
+            .Select(SanitizeKey)
+            .Where(part => part.Length > 0));
+        return (SanitizeKey(value[(slash + 1)..]), folder);
+    }
+
+    private static void SetFolder(Dictionary<string, string> folders, string key, string folder) {
+        if (string.IsNullOrEmpty(folder)) {
+            folders.Remove(key);
+        } else {
+            folders[key] = folder;
+        }
+    }
+
+    private static bool MoveFolder(Dictionary<string, string> folders, string key, string folder) {
+        if (string.Equals(FolderOf(folders, key), folder, StringComparison.Ordinal)) {
+            SetStatus("NAME_UNCHANGED", "Name unchanged.", UIColors.ObjectActive);
+            return false;
+        }
+        SetFolder(folders, key, folder);
+        UserResourceManager.Config.RequestSave(50);
+        SetStatus("MOVED_RESOURCE", "Moved {0}.", UIColors.ObjectActiveMathOk, key);
+        return true;
+    }
+
+    private static string SanitizeKey(string value) {
+        if (string.IsNullOrWhiteSpace(value)) {
+            return string.Empty;
+        }
+
+        char[] invalid = Path.GetInvalidFileNameChars();
+        string result = new(value.Trim().Select(c => invalid.Contains(c) ? '_' : c).ToArray());
+        return result.Trim().Trim('.', ' ');
+    }
+
+    private static string T(string key, string defaultValue, params object[] args) => string.Format(MainCore.Tr.Get(key, defaultValue), args);
+
+    private static void SetStatus(string key, string defaultValue, Color color, params object[] args) => SetStatus(T(key, defaultValue, args), color);
+
+    private static void SetStatus(string text, Color color) {
+        if (statusLabel == null) {
+            return;
+        }
+
+        statusLabel.text = text;
+        statusLabel.color = color;
+    }
+
+    private static RectTransform CreateStretch(Transform parent, string name) {
+        GameObject obj = new(name);
+        obj.transform.SetParent(parent, false);
+        RectTransform rect = obj.AddComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+        return rect;
+    }
+
+    private static RectTransform CreateContainer(Transform parent, string name) {
+        GameObject obj = new(name);
+        obj.transform.SetParent(parent, false);
+        RectTransform rect = obj.AddComponent<RectTransform>();
+        return rect;
+    }
+
+    private static RectTransform CreateRow(Transform parent, float top) {
+        GameObject obj = new("Row");
+        obj.transform.SetParent(parent, false);
+        RectTransform rect = obj.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(1f, 1f);
+        rect.offsetMin = new Vector2(12f, -top - 50f);
+        rect.offsetMax = new Vector2(-12f, -top);
+        return rect;
+    }
+
+    private static TextMeshProUGUI CreateText(Transform parent, string text, float size, TextAlignmentOptions alignment) {
+        TextMeshProUGUI label = O5Factory.ControlText(O5KitAdapters.Ctx, parent, 24f, true);
+        label.text = text;
+        label.fontSize = size;
+        label.alignment = alignment;
+        label.verticalAlignment = VerticalAlignmentOptions.Middle;
+        label.raycastTarget = false;
+        return label;
+    }
+
+    private static void ResizeInput(RectTransform rect, float rightWidth) => rect.offsetMax = new Vector2(-rightWidth, 0f);
+
+    private static void PlaceRight(RectTransform rect, float width, float height = 0f, float rightOffset = 0f) {
+        rect.anchorMin = new Vector2(1f, height > 0f ? 0.5f : 0f);
+        rect.anchorMax = new Vector2(1f, height > 0f ? 0.5f : 1f);
+        rect.pivot = new Vector2(1f, 0.5f);
+        rect.offsetMin = new Vector2(-rightOffset - width, height > 0f ? -height * 0.5f : 0f);
+        rect.offsetMax = new Vector2(-rightOffset, 0f);
+    }
+
+    private static void PlaceHalf(RectTransform rect, bool right) {
+        rect.anchorMin = new Vector2(right ? 0.5f : 0f, 0f);
+        rect.anchorMax = new Vector2(right ? 1f : 0.5f, 1f);
+        rect.offsetMin = new Vector2(right ? 4f : 0f, 0f);
+        rect.offsetMax = new Vector2(right ? 0f : -4f, 0f);
+    }
+}

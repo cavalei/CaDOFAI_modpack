@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ADOFAI 模块的 UMM 构建工程。
+    与上游 Overlayer.Module.ADOFAI.csproj 并行：上游引用 MelonLoader 版 Overlayer，
+    本工程引用我们自己的 UMM 版 Overlayer.dll。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Overlayer.Module.ADOFAI</AssemblyName>
+    <RootNamespace>Overlayer.Module.ADOFAI</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <DebugType>none</DebugType>
+    <ProducibleReferenceAssembly>false</ProducibleReferenceAssembly>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <NoWarn>CS0618;CS0414;CS0649;CS0169;CS0162;CS0219;CS8632;CS8981;CS8618;CS8625</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <GamePath Condition="'$(GamePath)' == ''">E:\SteamLibrary\steamapps\common\A Dance of Fire and Ice</GamePath>
+    <GameData Condition="'$(GameData)' == ''">A Dance of Fire and Ice_Data</GameData>
+    <Managed>$(GamePath)\$(GameData)\Managed</Managed>
+    <UmmDir>$(Managed)\UnityModManager</UmmDir>
+    <Libs>$(MSBuildProjectDirectory)\..\..\libs</Libs>
+    <OverlayerDll>$(MSBuildProjectDirectory)\..\..\Overlayer\Overlayer\bin\Release\netstandard2.1\Overlayer.dll</OverlayerDll>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="**\*.cs" Exclude="bin\**;obj\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <GameAsm Include="$(Managed)\*.dll"
+             Exclude="$(Managed)\mscorlib.dll;$(Managed)\netstandard.dll;$(Managed)\System*.dll;$(Managed)\Microsoft.CSharp.dll;$(Managed)\Microsoft.VisualBasic*.dll;$(Managed)\Mono.*.dll;$(Managed)\I18N*.dll" />
+    <Reference Include="@(GameAsm)">
+      <Private>false</Private>
+    </Reference>
+
+    <Reference Include="Overlayer">
+      <HintPath>$(OverlayerDll)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(UmmDir)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="O5Kit.1.0">
+      <HintPath>$(Libs)\O5Kit.1.0.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

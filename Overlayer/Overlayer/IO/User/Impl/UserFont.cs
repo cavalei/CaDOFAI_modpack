@@ -1,0 +1,155 @@
+﻿using Newtonsoft.Json.Linq;
+using Overlayer.Core;
+using Overlayer.IO.Interface;
+using Overlayer.Package;
+using UnityEngine;
+
+#if ML && IL2CPP
+using Il2CppTMPro;
+#else
+using TMPro;
+#endif
+
+namespace Overlayer.IO.User.Impl;
+
+public class UserFont : UserResourceBase<TMP_FontAsset>, ISettingsFile {
+    public static readonly HashSet<string> Ext = new(StringComparer.OrdinalIgnoreCase) { ".ttf", ".otf" };
+
+#if ML && IL2CPP
+    private static readonly HashSet<TMP_FontAsset> StolenFonts = new();
+
+    private static bool IsStolen(TMP_FontAsset font) {
+        if (font == null) {
+            return false;
+        }
+        lock (StolenFonts) {
+            try {
+                return StolenFonts.Contains(font);
+            } catch {
+                return false;
+            }
+        }
+    }
+#endif
+
+    public enum Result {
+        Success,
+        KeyAlreadyExists,
+        NotFound,
+        InvalidArgument,
+        Failed,
+    }
+
+    public Result Load(
+        string key,
+        string path
+    ) {
+        try {
+            if (Cache.ContainsKey(key)) {
+                return Result.KeyAlreadyExists;
+            }
+
+            if (!File.Exists(path)) {
+                return Result.NotFound;
+            }
+
+            var ext = Path.GetExtension(path).ToLowerInvariant();
+
+            if (!Ext.Contains(ext)) {
+                return Result.InvalidArgument;
+            }
+
+#if ML && IL2CPP
+            // Stripped runtimes expose no Font(path) ctor: fall back to a
+            // game font so text stays readable. Stolen assets are tracked and
+            // never destroyed (see Remove/Dispose).
+            var stolen = Overlayer.Resource.ResourceManager.StealGameFont();
+            if (stolen == null) {
+                return Result.Failed;
+            }
+
+            Cache[key] = (path, stolen);
+            lock (StolenFonts) {
+                StolenFonts.Add(stolen);
+            }
+
+            return Result.Success;
+#else
+            var font = TMP_FontAsset.CreateFontAsset(new Font(path));
+
+            Cache[key] = (path, font);
+
+            return Result.Success;
+#endif
+        } catch (Exception e) {
+            MainCore.Log.Err($"{nameof(UserResourceManager)} Font load failed: {e}");
+            return Result.Failed;
+        }
+    }
+
+    public bool Remove(string key) {
+        if (!Cache.Remove(key, out var entry)) {
+            return false;
+        }
+
+#if ML && IL2CPP
+        if (IsStolen(entry.value)) {
+            return true;
+        }
+#endif
+        if (entry.value) {
+            UnityEngine.Object.Destroy(entry.value);
+        }
+
+        return true;
+    }
+
+    public JToken Serialize() {
+        var obj = new JObject();
+
+        foreach (var (key, (path, _)) in Cache) {
+            if (O5cpFormat.IsPackageKey(key)) {
+                continue;
+            }
+            obj[key] = UserResourceManager.ToUser(path);
+        }
+
+        return obj;
+    }
+
+    public void Deserialize(JToken token) {
+        if (token is not JObject obj) {
+            MainCore.Log.Wrn($"[{nameof(UserFont)}] Deserialize failed: token is not JObject");
+            return;
+        }
+
+        foreach (var property in obj.Properties()) {
+            var key = property.Name;
+            if (O5cpFormat.IsPackageKey(key)) {
+                continue;
+            }
+            var path = UserResourceManager.FromUser(property.Value.ToString());
+
+            var result = Load(key, path);
+
+            if (result != Result.Success) {
+                MainCore.Log.Wrn(
+                    $"[{nameof(UserFont)}] {result} {{ \"{property.Name}\": \"{path}\" }}"
+                );
+            }
+        }
+    }
+
+    public override void Dispose() {
+        foreach (var (_, value) in Cache.Values) {
+#if ML && IL2CPP
+            if (IsStolen(value)) {
+                continue;
+            }
+#endif
+            UnityEngine.Object.Destroy(value);
+        }
+
+        Cache.Clear();
+    }
+}

@@ -1,0 +1,294 @@
+﻿using Newtonsoft.Json.Linq;
+using Overlayer.IO.Fx;
+using Overlayer.IO.Interface;
+using Overlayer.IO.UnityComponent.Impl;
+namespace Overlayer.IO.Overlay;
+
+public sealed class OvObjectSettings : ISettingsFile, ICopyable<OvObjectSettings> {
+    public FxValue<string> Name = FxValue<string>.FromValue("OvObject");
+    public FxValue<bool> Enabled = new(true);
+
+    public RectTransformSettings RectTransformConfig = null;
+    public CanvasGroupSettings CanvasGroupConfig = null;
+    public TransformSettings TransformConfig = null;
+    public MeshFilterSettings MeshFilterConfig = null;
+    public MeshRendererSettings MeshRendererConfig = null;
+    public BoxColliderSettings BoxColliderConfig = null;
+    public SphereColliderSettings SphereColliderConfig = null;
+    public CapsuleColliderSettings CapsuleColliderConfig = null;
+    public MeshColliderSettings MeshColliderConfig = null;
+    public RigidbodySettings RigidbodyConfig = null;
+    public LightSettings LightConfig = null;
+    public ContentSizeFitterSettings ContentSizeFitterConfig = null;
+
+    public TextMeshProUGUISettings TextConfig = null;
+    public OvTextSettings TextEngineConfig = null;
+    public CanvasSettings CanvasConfig = null;
+    public HorizontalLayoutGroupSettings HorizontalLayoutGroupConfig = null;
+    public VerticalLayoutGroupSettings VerticalLayoutGroupConfig = null;
+    public GridLayoutGroupSettings GridLayoutGroupConfig = null;
+    public MovingManSettings MovingManConfig = null;
+    public ColorRangeSettings ColorRangeConfig = null;
+    public GraphSettings GraphConfig = null;
+    public RainSettings RainConfig = null;
+    public ImageSettings ImageConfig = null;
+    public MaskSettings MaskConfig = null;
+    public ShadowSettings ShadowConfig = null;
+    public OutlineSettings OutlineConfig = null;
+    public FxValue<bool> HasRectMask2D = new(false);
+    public FxValue<bool> RectMask2DEnabled = new(true);
+#if !IL2CPP
+    public BoxCollider2DSettings BoxCollider2DConfig = null;
+    public Rigidbody2DSettings Rigidbody2DConfig = null;
+#endif
+
+    public bool HasAnyFx => FxUtil.HasFx(Name)
+        || FxUtil.HasFx(Enabled)
+        || (RectTransformConfig?.HasAnyFx ?? false)
+        || (CanvasGroupConfig?.HasAnyFx ?? false)
+        || (TransformConfig?.HasAnyFx ?? false)
+        || (ContentSizeFitterConfig?.HasAnyFx ?? false)
+        || (TextConfig?.HasAnyFx ?? false)
+        || (CanvasConfig?.HasAnyFx ?? false)
+        || (HorizontalLayoutGroupConfig?.HasAnyFx ?? false)
+        || (VerticalLayoutGroupConfig?.HasAnyFx ?? false)
+        || (GridLayoutGroupConfig?.HasAnyFx ?? false)
+        || FxUtil.HasFx(TextEngineConfig?.Text)
+        || (MovingManConfig?.HasAnyFx ?? false)
+        || (ColorRangeConfig?.HasAnyFx ?? false)
+        || (GraphConfig?.HasAnyFx ?? false)
+        || (RainConfig?.HasAnyFx ?? false)
+        || (ImageConfig?.HasAnyFx ?? false)
+        || (MaskConfig?.HasAnyFx ?? false)
+        || (ShadowConfig?.HasAnyFx ?? false)
+        || (OutlineConfig?.HasAnyFx ?? false)
+        || (MeshFilterConfig?.HasAnyFx ?? false)
+        || (MeshRendererConfig?.HasAnyFx ?? false)
+        || (BoxColliderConfig?.HasAnyFx ?? false)
+        || (SphereColliderConfig?.HasAnyFx ?? false)
+        || (CapsuleColliderConfig?.HasAnyFx ?? false)
+        || (MeshColliderConfig?.HasAnyFx ?? false)
+        || (RigidbodyConfig?.HasAnyFx ?? false)
+        || (LightConfig?.HasAnyFx ?? false)
+        || FxUtil.HasFx(HasRectMask2D)
+        || FxUtil.HasFx(RectMask2DEnabled)
+#if !IL2CPP
+        || (BoxCollider2DConfig?.HasAnyFx ?? false)
+        || (Rigidbody2DConfig?.HasAnyFx ?? false)
+#endif
+        ;
+
+    public JToken Serialize() {
+        var obj = new JObject {
+            [nameof(Name)] = IOUtils.WriteFx(Name),
+        };
+        if (RectTransformConfig != null) {
+            obj[nameof(RectTransformConfig)] = RectTransformConfig.Serialize();
+        }
+        if (CanvasGroupConfig != null) {
+            obj[nameof(CanvasGroupConfig)] = CanvasGroupConfig.Serialize();
+        }
+        if (TransformConfig != null) {
+            obj[nameof(TransformConfig)] = TransformConfig.Serialize();
+        }
+        if (Enabled.UseFx || !Enabled.Value) {
+            obj[nameof(Enabled)] = IOUtils.WriteFx(Enabled);
+        }
+        if (TextConfig != null) {
+            obj[nameof(TextConfig)] = TextConfig.Serialize();
+            obj[nameof(TextEngineConfig)] = (TextEngineConfig ?? OvTextSettings.FromLegacy(TextConfig.Text.Value)).Serialize();
+        }
+        if (CanvasConfig != null) {
+            obj[nameof(CanvasConfig)] = CanvasConfig.Serialize();
+        }
+        if (HorizontalLayoutGroupConfig != null) {
+            obj[nameof(HorizontalLayoutGroupConfig)] = HorizontalLayoutGroupConfig.Serialize();
+        }
+        if (VerticalLayoutGroupConfig != null) {
+            obj[nameof(VerticalLayoutGroupConfig)] = VerticalLayoutGroupConfig.Serialize();
+        }
+        if (GridLayoutGroupConfig != null) {
+            obj[nameof(GridLayoutGroupConfig)] = GridLayoutGroupConfig.Serialize();
+        }
+        if (MovingManConfig != null) {
+            obj[nameof(MovingManConfig)] = MovingManConfig.Serialize();
+        }
+        if (ColorRangeConfig != null) {
+            obj[nameof(ColorRangeConfig)] = ColorRangeConfig.Serialize();
+        }
+        if (GraphConfig != null) {
+            obj[nameof(GraphConfig)] = GraphConfig.Serialize();
+        }
+        if (RainConfig != null) {
+            obj[nameof(RainConfig)] = RainConfig.Serialize();
+        }
+        if (ImageConfig != null) {
+            obj[nameof(ImageConfig)] = ImageConfig.Serialize();
+        }
+#if !IL2CPP
+        if (BoxCollider2DConfig != null) {
+            obj[nameof(BoxCollider2DConfig)] = BoxCollider2DConfig.Serialize();
+        }
+        if (Rigidbody2DConfig != null) {
+            obj[nameof(Rigidbody2DConfig)] = Rigidbody2DConfig.Serialize();
+        }
+#endif
+        if (ContentSizeFitterConfig != null) {
+            obj[nameof(ContentSizeFitterConfig)] = ContentSizeFitterConfig.Serialize();
+        }
+        if (MaskConfig != null) {
+            obj[nameof(MaskConfig)] = MaskConfig.Serialize();
+        }
+        if (ShadowConfig != null) {
+            obj[nameof(ShadowConfig)] = ShadowConfig.Serialize();
+        }
+        if (OutlineConfig != null) {
+            obj[nameof(OutlineConfig)] = OutlineConfig.Serialize();
+        }
+        if (MeshFilterConfig != null) {
+            obj[nameof(MeshFilterConfig)] = MeshFilterConfig.Serialize();
+        }
+        if (MeshRendererConfig != null) {
+            obj[nameof(MeshRendererConfig)] = MeshRendererConfig.Serialize();
+        }
+        if (BoxColliderConfig != null) {
+            obj[nameof(BoxColliderConfig)] = BoxColliderConfig.Serialize();
+        }
+        if (SphereColliderConfig != null) {
+            obj[nameof(SphereColliderConfig)] = SphereColliderConfig.Serialize();
+        }
+        if (CapsuleColliderConfig != null) {
+            obj[nameof(CapsuleColliderConfig)] = CapsuleColliderConfig.Serialize();
+        }
+        if (MeshColliderConfig != null) {
+            obj[nameof(MeshColliderConfig)] = MeshColliderConfig.Serialize();
+        }
+        if (RigidbodyConfig != null) {
+            obj[nameof(RigidbodyConfig)] = RigidbodyConfig.Serialize();
+        }
+        if (LightConfig != null) {
+            obj[nameof(LightConfig)] = LightConfig.Serialize();
+        }
+        if (HasRectMask2D.UseFx || HasRectMask2D.Value) {
+            obj[nameof(HasRectMask2D)] = IOUtils.WriteFx(HasRectMask2D);
+            if (RectMask2DEnabled.UseFx || !RectMask2DEnabled.Value) {
+                obj[nameof(RectMask2DEnabled)] = IOUtils.WriteFx(RectMask2DEnabled);
+            }
+        }
+        return obj;
+    }
+
+    public void Deserialize(JToken token) {
+        if (token is not JObject obj) {
+            return;
+        }
+
+        Name = IOUtils.ReadFx(obj, nameof(Name), Name);
+        Enabled = IOUtils.ReadFx(obj, nameof(Enabled), Enabled);
+        var rect = obj[nameof(RectTransformConfig)];
+        if (rect != null) {
+            RectTransformConfig ??= new RectTransformSettings();
+            RectTransformConfig.Deserialize(rect);
+        }
+        var canvasGroup = obj[nameof(CanvasGroupConfig)];
+        if (canvasGroup != null) {
+            CanvasGroupConfig ??= new CanvasGroupSettings();
+            CanvasGroupConfig.Deserialize(canvasGroup);
+        }
+        var contentSizeFitterProperty = obj.Property(nameof(ContentSizeFitterConfig));
+        var contentSizeFitter = contentSizeFitterProperty?.Value;
+        if (contentSizeFitterProperty == null || contentSizeFitter?.Type == JTokenType.Null) {
+            ContentSizeFitterConfig = null;
+        } else {
+            ContentSizeFitterConfig ??= new ContentSizeFitterSettings();
+            ContentSizeFitterConfig.Deserialize(contentSizeFitter);
+        }
+        TextConfig = ReadConfig<TextMeshProUGUISettings>(obj, nameof(TextConfig));
+        TextEngineConfig = ReadConfig<OvTextSettings>(obj, nameof(TextEngineConfig));
+        CanvasConfig = ReadConfig<CanvasSettings>(obj, nameof(CanvasConfig));
+        HorizontalLayoutGroupConfig = ReadConfig<HorizontalLayoutGroupSettings>(obj, nameof(HorizontalLayoutGroupConfig));
+        VerticalLayoutGroupConfig = ReadConfig<VerticalLayoutGroupSettings>(obj, nameof(VerticalLayoutGroupConfig));
+        GridLayoutGroupConfig = ReadConfig<GridLayoutGroupSettings>(obj, nameof(GridLayoutGroupConfig));
+        if (TextConfig != null) {
+            TextEngineConfig ??= OvTextSettings.FromLegacy(TextConfig.Text.Value);
+        } else {
+            TextEngineConfig = null;
+        }
+        MovingManConfig = ReadConfig<MovingManSettings>(obj, nameof(MovingManConfig));
+        ColorRangeConfig = ReadConfig<ColorRangeSettings>(obj, nameof(ColorRangeConfig));
+        GraphConfig = ReadConfig<GraphSettings>(obj, nameof(GraphConfig));
+        RainConfig = ReadConfig<RainSettings>(obj, nameof(RainConfig));
+        ImageConfig = ReadConfig<ImageSettings>(obj, nameof(ImageConfig));
+#if !IL2CPP
+        BoxCollider2DConfig = ReadConfig<BoxCollider2DSettings>(obj, nameof(BoxCollider2DConfig));
+        Rigidbody2DConfig = ReadConfig<Rigidbody2DSettings>(obj, nameof(Rigidbody2DConfig));
+#endif
+        MaskConfig = ReadConfig<MaskSettings>(obj, nameof(MaskConfig));
+        ShadowConfig = ReadConfig<ShadowSettings>(obj, nameof(ShadowConfig));
+        OutlineConfig = ReadConfig<OutlineSettings>(obj, nameof(OutlineConfig));
+        TransformConfig = ReadConfig<TransformSettings>(obj, nameof(TransformConfig));
+        MeshFilterConfig = ReadConfig<MeshFilterSettings>(obj, nameof(MeshFilterConfig));
+        MeshRendererConfig = ReadConfig<MeshRendererSettings>(obj, nameof(MeshRendererConfig));
+        BoxColliderConfig = ReadConfig<BoxColliderSettings>(obj, nameof(BoxColliderConfig));
+        SphereColliderConfig = ReadConfig<SphereColliderSettings>(obj, nameof(SphereColliderConfig));
+        CapsuleColliderConfig = ReadConfig<CapsuleColliderSettings>(obj, nameof(CapsuleColliderConfig));
+        MeshColliderConfig = ReadConfig<MeshColliderSettings>(obj, nameof(MeshColliderConfig));
+        RigidbodyConfig = ReadConfig<RigidbodySettings>(obj, nameof(RigidbodyConfig));
+        LightConfig = ReadConfig<LightSettings>(obj, nameof(LightConfig));
+        HasRectMask2D = IOUtils.ReadFx(obj, nameof(HasRectMask2D), HasRectMask2D);
+        RectMask2DEnabled = IOUtils.ReadFx(obj, nameof(RectMask2DEnabled), RectMask2DEnabled);
+    }
+
+    public OvObjectSettings Copy() {
+        return new OvObjectSettings {
+            Name = Name?.Copy(),
+            Enabled = Enabled?.Copy(),
+            RectTransformConfig = RectTransformConfig?.Copy(),
+            CanvasGroupConfig = CanvasGroupConfig?.Copy(),
+            TransformConfig = TransformConfig?.Copy(),
+            ContentSizeFitterConfig = ContentSizeFitterConfig?.Copy(),
+            TextConfig = TextConfig?.Copy(),
+            TextEngineConfig = TextEngineConfig?.Copy(),
+            CanvasConfig = CanvasConfig?.Copy(),
+            HorizontalLayoutGroupConfig = HorizontalLayoutGroupConfig?.Copy(),
+            VerticalLayoutGroupConfig = VerticalLayoutGroupConfig?.Copy(),
+            GridLayoutGroupConfig = GridLayoutGroupConfig?.Copy(),
+            MovingManConfig = MovingManConfig?.Copy(),
+            ColorRangeConfig = ColorRangeConfig?.Copy(),
+            GraphConfig = GraphConfig?.Copy(),
+            RainConfig = RainConfig?.Copy(),
+            ImageConfig = ImageConfig?.Copy(),
+#if !IL2CPP
+            BoxCollider2DConfig = BoxCollider2DConfig?.Copy(),
+            Rigidbody2DConfig = Rigidbody2DConfig?.Copy(),
+#endif
+            MaskConfig = MaskConfig?.Copy(),
+            ShadowConfig = ShadowConfig?.Copy(),
+            OutlineConfig = OutlineConfig?.Copy(),
+            MeshFilterConfig = MeshFilterConfig?.Copy(),
+            MeshRendererConfig = MeshRendererConfig?.Copy(),
+            BoxColliderConfig = BoxColliderConfig?.Copy(),
+            SphereColliderConfig = SphereColliderConfig?.Copy(),
+            CapsuleColliderConfig = CapsuleColliderConfig?.Copy(),
+            MeshColliderConfig = MeshColliderConfig?.Copy(),
+            RigidbodyConfig = RigidbodyConfig?.Copy(),
+            LightConfig = LightConfig?.Copy(),
+            HasRectMask2D = HasRectMask2D?.Copy(),
+            RectMask2DEnabled = RectMask2DEnabled?.Copy()
+        };
+    }
+
+    private static T ReadConfig<T>(JObject obj, string key)
+        where T : class, ISettingsFile, new() {
+        var token = obj[key];
+
+        if (token == null) {
+            return null;
+        }
+
+        var cfg = new T();
+        cfg.Deserialize(token);
+
+        return cfg;
+    }
+}

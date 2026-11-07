@@ -1,0 +1,310 @@
+using O5Kit.Core;
+using Overlayer.Tag.Core;
+using UnityEngine;
+
+namespace Overlayer.TagImpl;
+
+public static class Effects {
+    private sealed class AnimationState {
+        internal double Previous;
+        internal double Target;
+        internal double StartedAt;
+    }
+
+    private static readonly Dictionary<string, AnimationState> easedValues = [];
+    private static readonly Dictionary<string, AnimationState> movingValues = [];
+
+    private sealed class ColorRangeMemo {
+        internal int ProgressBits;
+        internal int MaxLength;
+        internal string Result;
+    }
+
+    private static readonly object colorCacheLock = new();
+    private static readonly Dictionary<string, (bool ok, Color color, bool hasAlpha)> parsedColors = [];
+    private static readonly Dictionary<(string, string), ColorRangeMemo> colorRangeMemos = [];
+
+    [Tag(TagType = TagType.ProcessFormat, Desc = "Smoothly follows a tag value with easing\nEx) {EasedValue:Combo} / {EasedValue:Combo,0,500,OutExpo}\nargs are comma-separated: tag, digits, milliseconds, ease")]
+    public static double EasedValue(string tagName, int digits = -1, double speed = 500,
+        O5Ease ease = O5Ease.Linear) {
+        if (!TryReadNumber(tagName, out double value)) {
+            return 0;
+        }
+
+        AnimationState state = GetState(easedValues, tagName, value);
+        double now = UnityEngine.Time.realtimeSinceStartup * 1000d;
+        double current = Interpolate(state, now, speed, ease);
+        if (value != state.Target) {
+            state.Previous = current;
+            state.Target = value;
+            state.StartedAt = now;
+            current = state.Previous;
+        }
+
+        return digits < 0 ? current : Math.Round(current, digits);
+    }
+
+    [Tag]
+    public static string ColorRange(string tagName, double minimum, double maximum, string minimumHex,
+        string maximumHex, O5Ease ease = O5Ease.Linear, int maxLength = -1) {
+        if (!TryColorRangeProgress(tagName, minimum, maximum, ease, out float progress)
+            || !TryColor(minimumHex, out Color from, out bool fromAlpha)
+            || !TryColor(maximumHex, out Color to, out bool toAlpha)) {
+            return string.Empty;
+        }
+
+        // Same hex pair + progress + maxLength always yields the same string; reuse it.
+        int progressBits = BitConverter.SingleToInt32Bits(progress);
+        var memoKey = (minimumHex, maximumHex);
+        lock (colorCacheLock) {
+            if (colorRangeMemos.TryGetValue(memoKey, out ColorRangeMemo memo)
+                && memo.ProgressBits == progressBits && memo.MaxLength == maxLength) {
+                return memo.Result;
+            }
+        }
+
+        Color color = Color.LerpUnclamped(from, to, progress);
+        string result = fromAlpha || toAlpha
+#if ML && IL2CPP
+            ? Overlayer.Compat.HtmlColor.ToHtmlStringRGBA(color)
+            : Overlayer.Compat.HtmlColor.ToHtmlStringRGB(color);
+#else
+            ? ColorUtility.ToHtmlStringRGBA(color)
+            : ColorUtility.ToHtmlStringRGB(color);
+#endif
+        result = maxLength < 0 || result.Length <= maxLength ? result : result[..maxLength];
+        lock (colorCacheLock) {
+            if (!colorRangeMemos.TryGetValue(memoKey, out ColorRangeMemo memo)) {
+                if (colorRangeMemos.Count > 256) {
+                    colorRangeMemos.Clear();
+                }
+                colorRangeMemos[memoKey] = memo = new ColorRangeMemo();
+            }
+            memo.ProgressBits = progressBits;
+            memo.MaxLength = maxLength;
+            memo.Result = result;
+        }
+        return result;
+    }
+
+    internal static bool TryColorRangeProgress(string tagName, double minimum, double maximum, O5Ease ease, out float progress) {
+        progress = 0f;
+        if (!TryReadNumber(tagName, out double value)) {
+            return false;
+        }
+
+        if (maximum <= minimum) {
+            return true;
+        }
+
+        progress = EaseValue(Mathf.Clamp01((float)((value - minimum) / (maximum - minimum))), ease);
+        return true;
+    }
+
+    [Tag]
+    public static double MovingMan(string tagName, double startSize, double endSize, double defaultSize,
+        double speed, bool invert = false, O5Ease ease = O5Ease.OutExpo) {
+        if (!TryReadNumber(tagName, out double value)) {
+            return defaultSize;
+        }
+
+        AnimationState state = GetState(movingValues, tagName, value);
+        double now = UnityEngine.Time.realtimeSinceStartup * 1000d;
+        if (value != state.Target) {
+            state.Target = value;
+            state.StartedAt = now;
+        }
+
+        if (speed <= 0 || now - state.StartedAt >= speed) {
+            return defaultSize;
+        }
+
+        float progress = Mathf.Clamp01((float)((now - state.StartedAt) / speed));
+        float eased = EaseValue(invert ? 1f - progress : progress, ease);
+        return startSize + ((endSize - startSize) * eased);
+    }
+
+    private static AnimationState GetState(Dictionary<string, AnimationState> states, string key, double value) {
+        if (!states.TryGetValue(key, out AnimationState state)) {
+            state = new AnimationState {
+                Previous = value,
+                Target = value,
+                StartedAt = UnityEngine.Time.realtimeSinceStartup * 1000d
+            };
+            states[key] = state;
+        }
+
+        return state;
+    }
+
+    private static double Interpolate(AnimationState state, double now, double speed, O5Ease ease) {
+        if (speed <= 0) {
+            return state.Target;
+        }
+
+        float progress = Mathf.Clamp01((float)((now - state.StartedAt) / speed));
+        return state.Previous + ((state.Target - state.Previous) * EaseValue(progress, ease));
+    }
+
+    private static float EaseValue(float progress, O5Ease ease) => ease switch {
+        O5Ease.Linear => progress,
+        O5Ease.InSine => 1f - Mathf.Cos(progress * (float)Math.PI * 0.5f),
+        O5Ease.OutSine => Mathf.Sin(progress * (float)Math.PI * 0.5f),
+        O5Ease.InOutSine => -(Mathf.Cos((float)Math.PI * progress) - 1f) * 0.5f,
+        O5Ease.InQuad => progress * progress,
+        O5Ease.OutQuad => 1f - ((1f - progress) * (1f - progress)),
+        O5Ease.InOutQuad => progress < 0.5f ? 2f * progress * progress : 1f - (Mathf.Pow((-2f * progress) + 2f, 2f) / 2f),
+        O5Ease.InCubic => progress * progress * progress,
+        O5Ease.OutCubic => 1f - Mathf.Pow(1f - progress, 3f),
+        O5Ease.InOutCubic => progress < 0.5f ? 4f * progress * progress * progress : 1f - (Mathf.Pow((-2f * progress) + 2f, 3f) / 2f),
+        O5Ease.OutExpo => progress >= 1f ? 1f : 1f - Mathf.Pow(2f, -10f * progress),
+        O5Ease.OutCirc => Mathf.Sqrt(1f - Mathf.Pow(progress - 1f, 2f)),
+        O5Ease.OutBack => 1f + (2.70158f * Mathf.Pow(progress - 1f, 3f)) + (1.70158f * Mathf.Pow(progress - 1f, 2f)),
+        O5Ease.InQuart => progress * progress * progress * progress,
+        O5Ease.OutQuart => 1f - Mathf.Pow(1f - progress, 4f),
+        O5Ease.InOutQuart => progress < 0.5f ? 8f * progress * progress * progress * progress : 1f - Mathf.Pow(-2f * progress + 2f, 4f) / 2f,
+        O5Ease.InQuint => progress * progress * progress * progress * progress,
+        O5Ease.OutQuint => 1f - Mathf.Pow(1f - progress, 5f),
+        O5Ease.InOutQuint => progress < 0.5f ? 16f * progress * progress * progress * progress * progress : 1f - Mathf.Pow(-2f * progress + 2f, 5f) / 2f,
+        O5Ease.InExpo => progress <= 0f ? 0f : Mathf.Pow(2f, 10f * progress - 10f),
+        O5Ease.InOutExpo => progress <= 0f ? 0f : progress >= 1f ? 1f : progress < 0.5f ? Mathf.Pow(2f, 20f * progress - 10f) / 2f : (2f - Mathf.Pow(2f, -20f * progress + 10f)) / 2f,
+        O5Ease.InCirc => 1f - Mathf.Sqrt(1f - progress * progress),
+        O5Ease.InOutCirc => progress < 0.5f ? (1f - Mathf.Sqrt(1f - 4f * progress * progress)) / 2f : (Mathf.Sqrt(1f - Mathf.Pow(-2f * progress + 2f, 2f)) + 1f) / 2f,
+        O5Ease.InBack => 2.70158f * progress * progress * progress - 1.70158f * progress * progress,
+        O5Ease.InOutBack => progress < 0.5f ? 4f * progress * progress * ((3.59491f * 2f * progress) - 2.59491f) / 2f : (Mathf.Pow(2f * progress - 2f, 2f) * ((3.59491f * (2f * progress - 2f)) + 2.59491f) + 2f) / 2f,
+        O5Ease.InElastic => progress <= 0f ? 0f : progress >= 1f ? 1f : -Mathf.Pow(2f, 10f * progress - 10f) * Mathf.Sin((10f * progress - 10.75f) * 2.0944f),
+        O5Ease.OutElastic => progress <= 0f ? 0f : progress >= 1f ? 1f : Mathf.Pow(2f, -10f * progress) * Mathf.Sin((10f * progress - 0.75f) * 2.0944f) + 1f,
+        O5Ease.InOutElastic => progress <= 0f ? 0f : progress >= 1f ? 1f : progress < 0.5f ? -(Mathf.Pow(2f, 20f * progress - 10f) * Mathf.Sin((20f * progress - 11.125f) * 1.39626f)) / 2f : Mathf.Pow(2f, -20f * progress + 10f) * Mathf.Sin((20f * progress - 11.125f) * 1.39626f) / 2f,
+        O5Ease.InBounce => 1f - BounceOut(1f - progress),
+        O5Ease.OutBounce => BounceOut(progress),
+        O5Ease.InOutBounce => progress < 0.5f ? (1f - BounceOut(1f - 2f * progress)) / 2f : (1f + BounceOut(2f * progress - 1f)) / 2f,
+        _ => progress
+    };
+
+    private static float BounceOut(float t) {
+        const float n1 = 7.5625f;
+        const float d1 = 2.75f;
+        if (t < 1f / d1) {
+            return n1 * t * t;
+        }
+
+        if (t < 2f / d1) {
+            t -= 1.5f / d1;
+            return n1 * t * t + 0.75f;
+        }
+
+        if (t < 2.5f / d1) {
+            t -= 2.25f / d1;
+            return n1 * t * t + 0.9375f;
+        }
+
+        t -= 2.625f / d1;
+        return n1 * t * t + 0.984375f;
+    }
+
+    // Called every frame by effect tags and components: parse the tag
+    // reference and normalize its arguments once, not per call.
+    private sealed class NumberSource(bool valid, string name, string[] callArgs) {
+        public readonly bool Valid = valid;
+        public readonly string Name = name;
+        public readonly string[] CallArgs = callArgs;
+        public Binding Bound;
+    }
+
+    private sealed class Binding(TagCore tag, object[] args) {
+        public readonly TagCore Tag = tag;
+        public readonly object[] Args = args;
+    }
+
+    private static readonly Dictionary<string, NumberSource> numberSources = [];
+
+    private static bool TryReadNumber(string tagName, out double value) {
+        value = 0;
+        if (tagName == null) {
+            return false;
+        }
+
+        NumberSource source;
+        lock (numberSources) {
+            if (!numberSources.TryGetValue(tagName, out source)) {
+                bool valid = TagArgParser.TrySplit(tagName, out string name, out string[] callArgs);
+                source = new NumberSource(valid, name, callArgs);
+                if (numberSources.Count >= 256) {
+                    numberSources.Clear();
+                }
+                numberSources[tagName] = source;
+            }
+        }
+
+        if (!source.Valid || !TagManager.TryGet(source.Name, out TagCore tag)) {
+            return false;
+        }
+
+        try {
+            var bound = source.Bound;
+            if (bound == null || bound.Tag != tag) {
+                object[] args = BuildArgs(tag, source.CallArgs);
+                if (args == null) {
+                    return false;
+                }
+                source.Bound = bound = new Binding(tag, tag.NormalizeForInvoke(args));
+            }
+
+            object result = tag.InvokeNormalized(bound.Args);
+            // Hot path: value tags return double; skip ToString+parse entirely.
+            if (result is double d) {
+                value = d;
+                return true;
+            }
+            return result != null && double.TryParse(result.ToString(), out value);
+        } catch {
+            return false;
+        }
+    }
+
+    private static object[] BuildArgs(TagCore tag, string[] callArgs) {
+        if (callArgs.Length == 0) {
+            if (tag.RequiredParameterCount != 0) {
+                return null;
+            }
+            var args = Array.Empty<object>();
+            if (tag.Parameters.Length > 0) {
+                args = new object[tag.Parameters.Length];
+                for (int i = 0; i < args.Length; i++) {
+                    args[i] = tag.Parameters[i].DefaultValue;
+                }
+            }
+            return args;
+        }
+        return callArgs.Length < tag.RequiredParameterCount ? null : callArgs;
+    }
+
+    private static bool TryColor(string hex, out Color color, out bool hasAlpha) {
+        color = default;
+        hasAlpha = false;
+        if (hex == null) {
+            return false;
+        }
+        lock (colorCacheLock) {
+            if (parsedColors.TryGetValue(hex, out var cached)) {
+                (color, hasAlpha) = (cached.color, cached.hasAlpha);
+                return cached.ok;
+            }
+        }
+        string trimmed = hex.TrimStart(['#']);
+        hasAlpha = trimmed.Length is 4 or 8;
+        bool ok = trimmed.Length is 3 or 4 or 6 or 8
+#if ML && IL2CPP
+            && Overlayer.Compat.HtmlColor.TryParseHtmlString("#" + trimmed, out color);
+#else
+            && ColorUtility.TryParseHtmlString("#" + trimmed, out color);
+#endif
+        lock (colorCacheLock) {
+            if (parsedColors.Count > 256) {
+                parsedColors.Clear();
+            }
+            parsedColors[hex] = (ok, color, hasAlpha);
+        }
+        return ok;
+    }
+}

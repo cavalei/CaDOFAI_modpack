@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Overlayer.Module.ADOFAI.Tests</RootNamespace>
+    <AssemblyName>Overlayer.Module.ADOFAI.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- Link sources directly: the module itself must compile without the game DLL,
+       but THESE tests intentionally load the real game assembly to verify that
+       every registered SafeMember name actually resolves. -->
+  <ItemGroup>
+    <Compile Include="..\..\Overlayer\Overlayer\Utility\Access\SafeAccess.cs" />
+    <Compile Include="..\..\Overlayer\Overlayer\Utility\Access\SafeMember.cs" />
+    <Compile Include="..\ADOFAI\GameAccess.cs" />
+  </ItemGroup>
+
+</Project>
