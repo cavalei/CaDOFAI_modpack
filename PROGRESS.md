@@ -4,6 +4,35 @@
 
 ---
 
+## 阶段 4：重新打包发布 v2.1（2026-11-08）
+
+### 做了什么
+
+```
+① payload\Mods\OverlayerUMM\ 三个 DLL 换成修复版（哈希校验一致）
+② 用 D:\WinRAR\Rar.exe 重打自解压：
+   rar a -r -s -sfx -z<comment> CaDOFAI_v2.1.exe *
+   关键：必须加 -s（固结压缩），否则 49 MB；加了是 28.28 MB，与原版 28.44 MB 持平
+③ Release v2.1 删掉三个零散 DLL 资产，只留整包 CaDOFAI_v2.1.exe
+④ 更新 Release 说明为"自解压安装包，已内含修复后的 DLL"
+```
+
+### 验证
+
+```
+✅ 包内三个 DLL 解出后与构建产物哈希一致
+✅ 包内路径正确（无 payload\ 前缀），102 个文件
+✅ 体积 28.28 MB，与原版一致
+```
+
+### 备注
+
+```
+SFX 脚本沿用原版：Setup=open_readme.bat / Title=CaDOFAI v2.1 安装 / Text=解压到游戏根目录
+WinRAR 装在 D:\WinRAR（不是默认路径，找的时候要看注册表 HKCU\SOFTWARE\WinRAR）
+```
+---
+
 ## 阶段 3：场景门控 + 模块加载（2026-11-08）
 
 ### 现象
