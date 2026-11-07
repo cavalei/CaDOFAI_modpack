@@ -41,7 +41,13 @@
 4. **新增 `Overlayer.Module.ADOFAI/ADOFAI/Overlayer.Module.ADOFAI.umm.csproj`**
    与 3 同理，改为引用本项目编译出的 `Overlayer.dll`。
 
-5. **新增 `StrictJudge/`**（原创模块，GPL-3.0 同样适用）
+5. **`UmmLoader` 补充两处行为（对齐旧移植版）**
+   - `LoadModuleAssemblies`：扫描模组目录下 `Overlayer.Module.*.dll` 并 `Assembly.LoadFrom`
+   - `OverlayerUmmBoot.ApplySceneGate`：反射读 `scrController.instance`，为空（主界面）时隐藏所有画布，
+     进入关卡后恢复；每 0.25 秒判定一次，切场景强制重判
+   - `OverlayerFilePath` 返回 `<游戏根>\UserData`（与 MelonLoader 版一致，Runtime 会再拼 `Overlayer`）
+
+6. **新增 `StrictJudge/`**（原创模块，GPL-3.0 同样适用）
 
 > 上游 5.9.3 / 1.4.6 已自带的部分（`GameAccess` 读 `LevelData`、`Song.cs` 走 `GameAccess.LevelSong`）
 > 无需再改，本项目直接沿用。

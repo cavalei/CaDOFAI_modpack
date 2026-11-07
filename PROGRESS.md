@@ -4,6 +4,79 @@
 
 ---
 
+## 阶段 3：场景门控 + 模块加载（2026-11-08）
+
+### 现象
+
+新编版本在主界面也渲染画布；旧版没有。
+
+### 排查
+
+```
+二进制字符串对比旧版 DLL：
+  旧版独有  LoadModuleAssemblies / InstallSceneHook / _ready / BootNow / get_dataPath
+  新版独有  OverlayerUmmBoot / UmmHost / BootDelay
+结论：旧版自己扫模块 + 有场景门控，我们这版两者都缺
+另：旧版 DLL 内嵌 C:\Users\11446\...\ov5port\...pdb 路径，不能作为发布物
+```
+
+### 修复
+
+```
+① OverlayerUmmBoot.ApplySceneGate：反射 scrController.instance 判断是否在关卡，主界面隐藏画布
+② UmmLoader.LoadModuleAssemblies：扫 Overlayer.Module.*.dll 并 LoadFrom
+③ 保留阶段 2 的 UserData 数据目录修复
+```
+
+### 验证
+
+```
+✅ 编译 0 error，二进制无个人路径
+✅ 用户实测：主界面干净、关卡内正常、退回主界面重新隐藏
+```
+---
+
+## 阶段 2：数据目录修复 + Share.json 缺失（2026-11-08）
+
+### 现象
+
+分发安装后，Overlayer 不加载 `UserData/Overlayer/Canvases/Share.json`。
+
+### 根因（两个，叠加）
+
+```
+① UmmLoader 把 OverlayerFilePath 返回成 modEntry.Path（Mods\OverlayerUMM）
+   而 Runtime 会再拼一层 "Overlayer" → 数据目录变成 Mods\OverlayerUMM\Overlayer\
+   结果：Canvases 指向空目录，任何画布都读不到
+② 即便路径正确，UserData\Overlayer\Canvases 里也只有 Cavalei.json
+   分发包的 Share.json 没有被落到该目录
+```
+
+### 修复
+
+```
+① UmmLoader.OverlayerFilePath 改为 MelonLoader.Utils.MelonEnvironment.UserDataDirectory
+   （与 MelonLoader 版语义一致 → RootPath = <游戏根>\UserData\Overlayer）
+② 从分发包 payload 复制 Canvases\Share.json 到 UserData\Overlayer\Canvases\
+③ 重编译 Overlayer.dll 并装回，三个 DLL 一起换成新版
+```
+
+### 验证
+
+```
+✅ 编译 0 error
+✅ Canvases 目录现在有 Cavalei.json + Share.json
+❌ 游戏内未验证：画布列表是否出现 Share、是否被默认选中
+```
+
+### 遗留
+
+```
+① Mods\OverlayerUMM\Overlayer\ 下还残留 6 个由错误路径生成的空壳文件（JS/Settings.json），待确认后删
+② Settings.json 里没有明显的「当前画布」字段，默认选哪个需实际看 UI
+```
+---
+
 ## 阶段 1：源码重建 + 首发 v2.0（2026-11-08）
 
 ### 完成了什么

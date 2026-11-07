@@ -1,6 +1,9 @@
 using System;
+using System.IO;
+using System.Reflection;
 using HarmonyLib;
 using Overlayer.Compat.Interface;
+using MelonLoader.Utils;
 using Overlayer.Core;
 using UnityEngine;
 using UnityModManagerNet;
@@ -21,6 +24,7 @@ public static class UmmLoader {
         harmony = new Harmony(modEntry.Info.Id);
         host = new UmmHost(modEntry, harmony);
 
+        LoadModuleAssemblies(modEntry);
         bootObject = new GameObject("OverlayerUmmBoot");
         UnityEngine.Object.DontDestroyOnLoad(bootObject);
         bootObject.AddComponent<OverlayerUmmBoot>().Init(host);
@@ -29,6 +33,27 @@ public static class UmmLoader {
         modEntry.OnUnload = OnUnload;
         modEntry.Logger.Log("[Overlayer] UMM loader armed, booting in 3s");
         return true;
+    }
+
+    /// <summary>扫描模组目录下的 Overlayer.Module.*.dll 并加载（对齐旧版移植的行为）。</summary>
+    private static void LoadModuleAssemblies(UnityModManager.ModEntry modEntry) {
+        try {
+            string dir = modEntry.Path;
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) {
+                return;
+            }
+
+            foreach (string dll in Directory.GetFiles(dir, "Overlayer.Module.*.dll")) {
+                try {
+                    Assembly.LoadFrom(dll);
+                    modEntry.Logger.Log("[Overlayer] Module assembly loaded: " + Path.GetFileName(dll));
+                } catch (Exception e) {
+                    modEntry.Logger.Warning("[Overlayer] Module load failed: " + Path.GetFileName(dll) + " - " + e.Message);
+                }
+            }
+        } catch (Exception e) {
+            modEntry.Logger.Warning("[Overlayer] Module scan failed: " + e.Message);
+        }
     }
 
     private static void OnUpdate(UnityModManager.ModEntry modEntry, float dt) {
@@ -67,7 +92,8 @@ public static class UmmLoader {
 
         public IOverlayerLogger OverlayerLogger => this;
 
-        public string OverlayerFilePath => modEntry.Path;
+        // 与 MelonLoader 版一致：数据目录是 <游戏根>\UserData，Runtime 会再拼一层 Overlayer
+        public string OverlayerFilePath => MelonLoader.Utils.MelonEnvironment.UserDataDirectory;
 
         public Harmony OverlayerHarmony => harmony;
 
