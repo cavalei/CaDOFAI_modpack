@@ -15,7 +15,7 @@ namespace Overlayer.Module.StrictJudge
     {
         public override string Name => "StrictJudge";
         public override string Author => "dsh";
-        public override string Version => "1.2.0";
+        public override string Version => "1.3.0";
 
         public override void OnDispose()
         {
@@ -674,7 +674,8 @@ namespace Overlayer.Module.StrictJudge
                     attemptKeys = attemptKeys.GetRange(0, take);
 
                 sb.Append($"<p style=\"color:#888;font-size:12px;margin:0 0 8px\">\u663e\u793a\u6700\u8fd1 {attemptKeys.Count} \u6b21\u8bb0\u5f55</p>");
-                sb.Append("<table><tr><th>\u8ba1\u6b21</th><th>\u5173\u5361\u540d</th><th>\u590d\u6d3b\u70b9</th><th>\u4e25\u5224\u8303\u56f4</th><th>\u5f53\u524d\u8303\u56f4</th><th>\u8f68\u9053</th><th>\u504f\u79fb</th><th>\u662f\u5426\u6b7b\u4ea1</th></tr>");
+                sb.Append($"<p style=\"color:#9ad0ff;font-size:14px;margin:0 0 10px\">\u5f53\u524d\u6b63\u5728\u6e38\u73a9\uff1a{System.Net.WebUtility.HtmlEncode(CurrentLevel)}</p>");
+                sb.Append("<table><tr><th>\u8ba1\u6b21</th><th>\u590d\u6d3b\u70b9</th><th>\u4e25\u5224\u8303\u56f4</th><th>\u5f53\u524d\u8303\u56f4</th><th>\u8f68\u9053</th><th>\u504f\u79fb</th><th>\u662f\u5426\u6b7b\u4ea1</th></tr>");
 
                 bool anyShown = false;
                 foreach (var att in attemptKeys)
@@ -686,7 +687,6 @@ namespace Overlayer.Module.StrictJudge
                     {
                         sb.Append("<tr>");
                         sb.Append($"<td>{(r.IsFirstOfAttempt ? "#" + r.Attempt : "")}</td>");
-                        sb.Append($"<td>{System.Net.WebUtility.HtmlEncode(r.Level)}</td>");
                         sb.Append($"<td>{r.CpText}</td>");
                         sb.Append($"<td>{r.StrictRange}</td><td>{r.CurrentRange}</td>");
                         sb.Append($"<td>{r.Tile}</td>");
@@ -868,6 +868,7 @@ sb.Append("<p style=\"color:#ff8a8a;font-size:13px;margin:0 0 4px\">\u6613\u6b7b
                 sb.Append("<h2>\u68c0\u67e5\u70b9</h2><table><tr><th>\u5173\u5361\u540d</th><th>\u590d\u6d3b\u70b9\u5e8f\u53f7</th><th>\u8f68\u9053\u53f7</th><th>\u8be5\u6bb5\u5931\u8d25\u6b21\u6570</th></tr>");
                 foreach (var lv in LevelCheckpoints.Keys)
                 {
+                    if (!string.IsNullOrEmpty(CurrentLevel) && lv != CurrentLevel) continue;
                     var map = LevelCheckpoints[lv];
                     var keys = new List<int>(map.Keys);
                     keys.Sort();
@@ -901,10 +902,36 @@ sb.Append("<p style=\"color:#ff8a8a;font-size:13px;margin:0 0 4px\">\u6613\u6b7b
             catch (Exception e) { Debug.LogWarning("[StrictJudge] html " + e.Message); }
         }
 
+        /// <summary>Excel 打开时会生成 ~$ 锁文件，也可能独占句柄；两者都视为“正在看表”。</summary>
+        private static bool ExcelLocked(string path)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(path);
+                var name = Path.GetFileName(path);
+                if (File.Exists(Path.Combine(dir, "~$" + name))) return true;
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    return false;
+                }
+            }
+            catch (IOException) { return true; }
+            catch { return true; }
+        }
+
         public static void WriteExcel()
         {
             RebuildDangerZones();
             WriteHtml();
+
+            // 正被 Excel 打开时不要动主文件：反复删除/重建会让 Excel 读到半截文件而崩溃
+            if (ExcelLocked(ExcelPath))
+            {
+                try { Xlsx.Write(Path.Combine(OutDir, "严判失败记录_副本.xlsx"), Rows, LevelCheckpoints); }
+                catch { }
+                return;
+            }
+
             try
             {
                 Xlsx.Write(ExcelPath, Rows, LevelCheckpoints);
